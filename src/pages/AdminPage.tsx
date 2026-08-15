@@ -1,0 +1,5 @@
+import { useEffect, useState } from "react"; import { messages, deleteMessage } from "../api"; import { Message, User } from "../types";
+export function AdminPage({ user }: { user: User }) {
+    const [data, setData] = useState<Message[]>([]); useEffect(() => { messages().then(setData) }, []); if (user.role !== "ADMIN") return <main className="page"><div className="error max-w-xl mx-auto">403 — Admin access required.</div></main>;
+    return <main className="page"><div className="max-w-5xl mx-auto"><h1 className="title">Admin moderation</h1><p className="muted mb-6">Moderate retained chat messages.</p><div className="panel overflow-hidden">{data.map(m => <div className="adminrow" key={m.id}><div><b>{m.senderName}</b><p className="muted text-sm">{m.deleted ? "Deleted" : m.content || m.file?.originalName}</p></div>{!m.deleted && <button className="btn-danger" onClick={async () => { const x = await deleteMessage(m.id); setData(d => d.map(a => a.id === x.id ? x : a)) }}>Delete</button>}</div>)}</div></div></main>
+}
