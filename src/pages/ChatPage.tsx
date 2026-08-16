@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowDown, Download, FileArchive, FileAudio, FileImage, FileText, FileVideo, Paperclip, Send, Trash2, Wifi, WifiOff } from "lucide-react";
-import { deleteMessage, messages, sendFile, sendText, upload } from "../api";
+import { deleteMessage, fileDownloadUrl, messages, sendFile, sendText, upload } from "../api";
 import { Message, User } from "../types";
 import { useSocket } from "../hooks/useSocket";
 
@@ -176,16 +176,16 @@ function MessageBubble({
                         <source src={file.url} type={mime} />
                     </video>
                     <p className="filecaption">{file.originalName}</p>
-                    <FileCard file={file} icon={<FileVideo size={18} />} />
+                    <FileCard messageId={m.id} file={file} icon={<FileVideo size={18} />} />
                 </div> :
                 isAudio ? <div className="space-y-2">
                     <audio className="w-full" controls preload="metadata">
                         <source src={file.url} type={mime} />
                     </audio>
                     <p className="filecaption">{file.originalName}</p>
-                    <FileCard file={file} icon={<FileAudio size={18} />} />
+                    <FileCard messageId={m.id} file={file} icon={<FileAudio size={18} />} />
                 </div> :
-                <FileCard file={file} icon={getFileIcon(mime)} />
+                <FileCard messageId={m.id} file={file} icon={getFileIcon(mime)} />
             }
 
             <time>{time}</time>
@@ -194,32 +194,57 @@ function MessageBubble({
 }
 
 /**
- * Cloudinary's fl_attachment flag tells the CDN to send the original asset as
- * a download instead of asking the browser to render it. This is important
- * for PDFs and raw/archive files because browser PDF viewers and cross-origin
- * download attributes are not reliable for Cloudinary URLs.
+ * All non-inline files are downloaded through the authenticated backend.
+ * The backend creates a short-lived signed Cloudinary download URL. This is
+ * intentionally used instead of the public res.cloudinary.com/upload URL so
+ * PDF/ZIP delivery works even when public PDF/ZIP delivery is restricted.
  */
-function attachmentUrl(url: string) {
-    if (!url) return url;
-    const marker = "/upload/";
-    const index = url.indexOf(marker);
-    if (index === -1) return url;
-    const prefixEnd = index + marker.length;
-    if (url.slice(prefixEnd).startsWith("fl_attachment/")) return url;
-    return `${url.slice(0, prefixEnd)}fl_attachment/${url.slice(prefixEnd)}`;
-}
+function FileCard({
+    messageId,
+    file,
+    icon
+}: {
+    messageId: string;
+    file: NonNullable<Message["file"]>;
+    icon: React.ReactNode;
+}) {
+    const [downloading, setDownloading] = useState(false);
 
-function FileCard({ file, icon }: { file: NonNullable<Message["file"]>; icon: React.ReactNode }) {
-    const downloadable = attachmentUrl(file.url);
+    async function download() {
+        if (downloading) return;
 
-    return <a className="filecard" href={downloadable} target="_blank" rel="noreferrer">
+        const popup = window.open("about:blank", "_blank");
+        if (!popup) {
+            window.alert("Please allow pop-ups to download this file.");
+            return;
+        }
+
+        try {
+            setDownloading(true);
+            const url = await fileDownloadUrl(messageId);
+            popup.location.href = url;
+        } catch {
+            popup.close();
+            window.alert("Unable to download this file. Please try again.");
+        } finally {
+            setDownloading(false);
+        }
+    }
+
+    return <button
+        type="button"
+        className="filecard text-left w-full"
+        onClick={download}
+        disabled={downloading}
+        title={`Download ${file.originalName}`}
+    >
         {icon}
-        <span className="min-w-0">
+        <span className="min-w-0 flex-1">
             <b className="block truncate">{file.originalName}</b>
             <small>{formatFileSize(file.size)} · {file.mimeType || "unknown type"}</small>
         </span>
-        <Download size={18} />
-    </a>;
+        <Download size={18} className={downloading ? "animate-pulse" : ""} />
+    </button>;
 }
 
 function getFileIcon(mime: string) {
