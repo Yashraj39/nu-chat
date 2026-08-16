@@ -3,7 +3,7 @@ import axios from "axios";
 
 export const API =
     import.meta.env.VITE_API_BASE_URL ||
-    "http://localhost:8080";
+    "https://nu-chat.onrender.com";
 
 
 export const client =

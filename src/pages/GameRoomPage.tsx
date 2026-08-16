@@ -251,10 +251,14 @@ function GameRoomContent({
     async function handleLeave() {
         try {
             await leaveRoom(id);
-        } catch {
+        } catch (err) {
+            console.error(
+                "Failed to leave game room:",
+                err
+            );
+        } finally {
+            navigate("/games");
         }
-
-        navigate("/games");
     }
 
 

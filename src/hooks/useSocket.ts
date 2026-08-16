@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 
 const WS =
     import.meta.env.VITE_WS_URL ||
-    "ws://localhost:8080/ws";
+    "ws://https://nu-chat.onrender.com/ws";
 
 export function useSocket(
     onChat: (x: any) => void,
