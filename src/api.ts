@@ -181,6 +181,21 @@ export async function sendFile(
 }
 
 
+/**
+ * Gets a short-lived, signed Cloudinary download URL from the backend.
+ * The request itself is authenticated with the user's JWT; the Cloudinary
+ * API secret never reaches the browser.
+ */
+export async function fileDownloadUrl(
+    messageId: string
+) {
+    const response = await client.get(
+        `/api/files/${encodeURIComponent(messageId)}/download-url`
+    );
+    return response.data.url as string;
+}
+
+
 export async function deleteMessage(
     id: string
 ) {
