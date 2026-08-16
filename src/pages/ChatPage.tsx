@@ -110,7 +110,6 @@ export function ChatPage({ user }: { user: User }) {
         <div className="composer">
             <label className="iconbtn cursor-pointer" title="Attach any file">
                 <Paperclip size={20} />
-                {/* No accept attribute: intentionally allows every browser-supported file type. */}
                 <input hidden type="file" onChange={attach} />
             </label>
             <textarea
@@ -155,7 +154,6 @@ function MessageBubble({
         mime === "image/avif";
     const isVideo = mime.startsWith("video/");
     const isAudio = mime.startsWith("audio/");
-    const isPdf = mime === "application/pdf";
 
     return <div className={`msgrow ${own ? "own" : ""}`}>
         <article className={`bubble ${own ? "ownbubble" : ""}`}>
@@ -178,16 +176,14 @@ function MessageBubble({
                         <source src={file.url} type={mime} />
                     </video>
                     <p className="filecaption">{file.originalName}</p>
+                    <FileCard file={file} icon={<FileVideo size={18} />} />
                 </div> :
                 isAudio ? <div className="space-y-2">
                     <audio className="w-full" controls preload="metadata">
                         <source src={file.url} type={mime} />
                     </audio>
                     <p className="filecaption">{file.originalName}</p>
-                </div> :
-                isPdf ? <div className="space-y-2">
-                    <iframe className="w-full h-80 rounded-lg border-0" src={file.url} title={file.originalName} />
-                    <FileCard file={file} icon={<FileText size={18} />} />
+                    <FileCard file={file} icon={<FileAudio size={18} />} />
                 </div> :
                 <FileCard file={file} icon={getFileIcon(mime)} />
             }
@@ -197,8 +193,26 @@ function MessageBubble({
     </div>;
 }
 
+/**
+ * Cloudinary's fl_attachment flag tells the CDN to send the original asset as
+ * a download instead of asking the browser to render it. This is important
+ * for PDFs and raw/archive files because browser PDF viewers and cross-origin
+ * download attributes are not reliable for Cloudinary URLs.
+ */
+function attachmentUrl(url: string) {
+    if (!url) return url;
+    const marker = "/upload/";
+    const index = url.indexOf(marker);
+    if (index === -1) return url;
+    const prefixEnd = index + marker.length;
+    if (url.slice(prefixEnd).startsWith("fl_attachment/")) return url;
+    return `${url.slice(0, prefixEnd)}fl_attachment/${url.slice(prefixEnd)}`;
+}
+
 function FileCard({ file, icon }: { file: NonNullable<Message["file"]>; icon: React.ReactNode }) {
-    return <a className="filecard" href={file.url} target="_blank" rel="noreferrer" download={file.originalName}>
+    const downloadable = attachmentUrl(file.url);
+
+    return <a className="filecard" href={downloadable} target="_blank" rel="noreferrer">
         {icon}
         <span className="min-w-0">
             <b className="block truncate">{file.originalName}</b>
