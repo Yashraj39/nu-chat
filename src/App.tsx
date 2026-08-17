@@ -270,11 +270,11 @@ function Shell({
                 >
 
                     <div className="logo small">
-                        P
+                        NU
                     </div>
 
                     <span className="font-bold">
-                        NU Chat
+                        Chat
                     </span>
 
                 </Link>
