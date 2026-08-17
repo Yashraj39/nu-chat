@@ -270,7 +270,7 @@ function Shell({
                 >
 
                     <div className="logo small">
-                        NU
+                        Chit
                     </div>
 
                     <span className="font-bold">
