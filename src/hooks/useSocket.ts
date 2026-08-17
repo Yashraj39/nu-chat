@@ -3,7 +3,9 @@ import { useEffect, useRef, useState } from "react";
 
 const WS =
     import.meta.env.VITE_WS_URL ||
-    "ws://https://nu-chat.onrender.com/ws";
+    (import.meta.env.PROD
+        ? "wss://nu-chat.onrender.com/ws"
+        : "ws://localhost:8080/ws");
 
 export function useSocket(
     onChat: (x: any) => void,
@@ -104,6 +106,30 @@ export function useSocket(
                         } catch (error) {
                             console.error(
                                 "Invalid game WebSocket message:",
+                                error
+                            );
+                        }
+                    }
+                )
+            );
+
+            /*
+ * Game room deletion updates
+ */
+            subscriptionsRef.current.push(
+                client.subscribe(
+                    "/topic/game/rooms/remove",
+                    (message: IMessage) => {
+                        try {
+                            const data = JSON.parse(message.body);
+
+                            onGamesRef.current({
+                                type: "ROOM_REMOVED",
+                                roomId: String(data),
+                            });
+                        } catch (error) {
+                            console.error(
+                                "Invalid room-removal WebSocket message:",
                                 error
                             );
                         }

@@ -80,63 +80,72 @@ export function GamesPage({
 
 
     useSocket(
-        () => {},
+        () => { },
 
-        (room: GameRoom) => {
+        (room: GameRoom | { type: string; roomId: string }) => {
 
-            setRooms(
-                (current) => {
+            /*
+             * Room was permanently deleted.
+             */
+            if (
+                "type" in room &&
+                room.type === "ROOM_REMOVED"
+            ) {
+                setRooms((current) =>
+                    current.filter(
+                        (item) =>
+                            item.id !== room.roomId
+                    )
+                );
 
-                    const index =
-                        current.findIndex(
-                            (item) =>
-                                item.id ===
-                                room.id
-                        );
+                return;
+            }
 
+            const gameRoom = room as GameRoom;
 
-                    /*
-                     * If room disappeared
-                     * from server, remove it.
-                     */
-                    if (
-                        room.status ===
-                        "FINISHED"
-                    ) {
-                        return current.filter(
-                            (item) =>
-                                item.id !==
-                                room.id
-                        );
-                    }
+            setRooms((current) => {
 
+                const index =
+                    current.findIndex(
+                        (item) =>
+                            item.id === gameRoom.id
+                    );
 
-                    /*
-                     * New room.
-                     */
-                    if (index === -1) {
-                        return [
-                            room,
-                            ...current,
-                        ];
-                    }
-
-
-                    /*
-                     * Existing room.
-                     */
-                    const next =
-                        [...current];
-
-                    next[index] =
-                        room;
-
-                    return next;
+                /*
+                 * Finished rooms should not appear
+                 * in the active room list.
+                 */
+                if (
+                    gameRoom.status === "FINISHED"
+                ) {
+                    return current.filter(
+                        (item) =>
+                            item.id !== gameRoom.id
+                    );
                 }
-            );
+
+                /*
+                 * New room.
+                 */
+                if (index === -1) {
+                    return [
+                        gameRoom,
+                        ...current,
+                    ];
+                }
+
+                /*
+                 * Existing room.
+                 */
+                const next = [...current];
+
+                next[index] = gameRoom;
+
+                return next;
+            });
         },
 
-        () => {}
+        () => { }
     );
 
 
@@ -169,25 +178,8 @@ export function GamesPage({
     }
 
 
-    async function join(
-        id: string
-    ) {
-
-        try {
-
-            await joinRoom(id);
-
-            navigate(
-                `/games/${id}`
-            );
-
-        } catch (error: any) {
-
-            alert(
-                error?.response?.data?.message ||
-                "Unable to join room."
-            );
-        }
+    function join(id: string) {
+        navigate(`/games/${id}`);
     }
 
 
@@ -345,24 +337,24 @@ export function GamesPage({
 
                                         <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 grid place-items-center">
                                             {room.gameType ===
-                                            "SNAKE"
+                                                "SNAKE"
                                                 ? "🐍"
                                                 : room.gameType ===
-                                                  "OX"
-                                                ? "⭕"
-                                                : "🎲"}
+                                                    "OX"
+                                                    ? "⭕"
+                                                    : "🎲"}
                                         </div>
 
                                         <div>
 
                                             <b>
                                                 {room.gameType ===
-                                                "SNAKE"
+                                                    "SNAKE"
                                                     ? "Snake"
                                                     : room.gameType ===
-                                                      "OX"
-                                                    ? "Tic-Tac-Toe"
-                                                    : "Ludo"}
+                                                        "OX"
+                                                        ? "Tic-Tac-Toe"
+                                                        : "Ludo"}
                                             </b>
 
                                             <p className="muted text-sm">
@@ -407,7 +399,7 @@ export function GamesPage({
                                             }
                                         >
                                             {room.status ===
-                                            "PLAYING"
+                                                "PLAYING"
                                                 ? "View"
                                                 : "Join"}
                                         </button>
