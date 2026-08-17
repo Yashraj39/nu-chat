@@ -54,9 +54,8 @@ export function useSocket(
             heartbeatIncoming: 10000,
             heartbeatOutgoing: 10000,
 
-            debug: () => {
-                // Uncomment while debugging WebSocket:
-                // console.log(message);
+            debug: (message) => {
+                console.log("[STOMP]", message);
             },
         });
 
@@ -189,12 +188,18 @@ export function useSocket(
             setConnected(false);
         };
 
-        client.onWebSocketClose = () => {
+        client.onWebSocketClose = (event) => {
+            console.log("WebSocket closed:", event);
             setConnected(false);
         };
 
         client.onWebSocketError = (error) => {
             console.error("WebSocket error:", error);
+            setConnected(false);
+        };
+
+        client.onWebSocketClose = (event) => {
+            console.log("WebSocket closed:", event);
             setConnected(false);
         };
 

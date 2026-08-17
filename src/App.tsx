@@ -274,7 +274,7 @@ function Shell({
                     </div>
 
                     <span className="font-bold">
-                        PulseChat
+                        NU Chat
                     </span>
 
                 </Link>
