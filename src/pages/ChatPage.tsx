@@ -2,9 +2,16 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowDown, Download, FileArchive, FileAudio, FileImage, FileText, FileVideo, Paperclip, Send, Trash2, Wifi, WifiOff } from "lucide-react";
 import { deleteMessage, fileDownloadUrl, messages, sendFile, sendText, upload } from "../api";
 import { Message, User } from "../types";
-import { useSocket } from "../hooks/useSocket";
 
-export function ChatPage({ user }: { user: User }) {
+export function ChatPage({
+    user,
+    incomingMessage,
+    connected,
+}: {
+    user: User;
+    incomingMessage: Message | null;
+    connected: boolean;
+}) {
     const [msgs, setMsgs] = useState<Message[]>([]);
     const [text, setText] = useState("");
     const [progress, setProgress] = useState<number | null>(null);
@@ -13,13 +20,56 @@ export function ChatPage({ user }: { user: User }) {
     const end = useRef<HTMLDivElement>(null);
     const list = useRef<HTMLDivElement>(null);
 
-    const add = (m: Message) => setMsgs(x =>
-        x.some(a => a.id === m.id)
-            ? x.map(a => a.id === m.id ? m : a)
-            : [...x, m].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-    );
+    useEffect(() => {
 
-    const { connected } = useSocket(add, () => { }, () => { });
+        if (
+            !incomingMessage
+        ) {
+            return;
+        }
+
+
+        setMsgs(
+            (current) => {
+
+                /*
+                 * Message already exists.
+                 * Update it instead of duplicating it.
+                 */
+                if (
+                    current.some(
+                        (message) =>
+                            message.id ===
+                            incomingMessage.id
+                    )
+                ) {
+
+                    return current.map(
+                        (message) =>
+                            message.id ===
+                                incomingMessage.id
+                                ? incomingMessage
+                                : message
+                    );
+                }
+
+
+                /*
+                 * New message.
+                 */
+                return [
+                    ...current,
+                    incomingMessage,
+                ].sort(
+                    (a, b) =>
+                        a.createdAt.localeCompare(
+                            b.createdAt
+                        )
+                );
+            }
+        );
+
+    }, [incomingMessage]);
 
     useEffect(() => {
         messages().then(setMsgs).catch(() => setError("Unable to load messages."));
@@ -164,28 +214,28 @@ function MessageBubble({
 
             {m.deleted ? <p className="deleted">This message was deleted</p> :
                 m.type === "TEXT" ? <p className="whitespace-pre-wrap break-words">{m.content}</p> :
-                !file ? <p className="muted">File metadata is unavailable.</p> :
-                isRasterImage ? <div>
-                    <a href={file.url} target="_blank" rel="noreferrer">
-                        <img className="chat-image" src={file.url} alt={file.originalName} loading="lazy" />
-                    </a>
-                    <p className="filecaption">{file.originalName}</p>
-                </div> :
-                isVideo ? <div>
-                    <video className="max-w-full rounded-lg" controls preload="metadata">
-                        <source src={file.url} type={mime} />
-                    </video>
-                    <p className="filecaption">{file.originalName}</p>
-                    <FileCard messageId={m.id} file={file} icon={<FileVideo size={18} />} />
-                </div> :
-                isAudio ? <div className="space-y-2">
-                    <audio className="w-full" controls preload="metadata">
-                        <source src={file.url} type={mime} />
-                    </audio>
-                    <p className="filecaption">{file.originalName}</p>
-                    <FileCard messageId={m.id} file={file} icon={<FileAudio size={18} />} />
-                </div> :
-                <FileCard messageId={m.id} file={file} icon={getFileIcon(mime)} />
+                    !file ? <p className="muted">File metadata is unavailable.</p> :
+                        isRasterImage ? <div>
+                            <a href={file.url} target="_blank" rel="noreferrer">
+                                <img className="chat-image" src={file.url} alt={file.originalName} loading="lazy" />
+                            </a>
+                            <p className="filecaption">{file.originalName}</p>
+                        </div> :
+                            isVideo ? <div>
+                                <video className="max-w-full rounded-lg" controls preload="metadata">
+                                    <source src={file.url} type={mime} />
+                                </video>
+                                <p className="filecaption">{file.originalName}</p>
+                                <FileCard messageId={m.id} file={file} icon={<FileVideo size={18} />} />
+                            </div> :
+                                isAudio ? <div className="space-y-2">
+                                    <audio className="w-full" controls preload="metadata">
+                                        <source src={file.url} type={mime} />
+                                    </audio>
+                                    <p className="filecaption">{file.originalName}</p>
+                                    <FileCard messageId={m.id} file={file} icon={<FileAudio size={18} />} />
+                                </div> :
+                                    <FileCard messageId={m.id} file={file} icon={getFileIcon(mime)} />
             }
 
             <time>{time}</time>

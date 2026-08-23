@@ -3,10 +3,12 @@ import {
     Route,
     Navigate,
     Link,
+    useLocation,
 } from "react-router-dom";
 
 import {
     useState,
+    useEffect
 } from "react";
 
 import {
@@ -17,6 +19,9 @@ import {
     Gamepad2,
     ShieldCheck,
 } from "lucide-react";
+
+import { useSocket } from "./hooks/useSocket";
+import type { Message } from "./types";
 
 import {
     join,
@@ -42,6 +47,8 @@ import {
 import {
     AdminPage,
 } from "./pages/AdminPage";
+
+
 
 
 export function App() {
@@ -259,6 +266,334 @@ function Shell({
     onLogout: () => void;
 }) {
 
+    const location =
+        useLocation();
+
+
+    /*
+     * Number of messages received while the user
+     * is not actively looking at Chat.
+     */
+    const [
+        unreadCount,
+        setUnreadCount,
+    ] = useState(0);
+
+
+    /*
+     * Last incoming chat message.
+     *
+     * This is passed down to ChatPage.
+     */
+    const [
+        incomingMessage,
+        setIncomingMessage,
+    ] = useState<Message | null>(null);
+
+
+    /*
+     * One global chat WebSocket for the whole
+     * logged-in application.
+     *
+     * Previously ChatPage owned this socket.
+     * Now Shell owns it so messages can be detected
+     * even while the user is on Games/Admin or another
+     * browser tab.
+     */
+    const {
+        connected,
+    } = useSocket(
+
+        (message: Message) => {
+
+            /*
+             * Always send the message to ChatPage.
+             */
+            setIncomingMessage(message);
+
+
+            /*
+             * Ignore messages sent by ourselves.
+             */
+            if (
+                message.senderId ===
+                user.id
+            ) {
+                return;
+            }
+
+
+            /*
+             * Determine whether the user is
+             * actually looking at the chat.
+             *
+             * We require ALL of these:
+             *
+             * 1. Browser tab/page is visible
+             * 2. Browser window has focus
+             * 3. Current route is /chat
+             */
+            const isActuallyLookingAtChat =
+                document.visibilityState ===
+                    "visible"
+                &&
+                document.hasFocus()
+                &&
+                location.pathname ===
+                    "/chat";
+
+
+            /*
+             * User is reading Chat.
+             *
+             * Therefore:
+             * - NO notification
+             * - NO unread count
+             */
+            if (
+                isActuallyLookingAtChat
+            ) {
+
+                return;
+            }
+
+
+            /*
+             * User has switched away from Chat.
+             *
+             * Increase unread count.
+             */
+            setUnreadCount(
+                (current) =>
+                    current + 1
+            );
+
+
+            /*
+             * Show browser notification.
+             *
+             * This works only while this website is
+             * running. If NU Chat is completely closed,
+             * nothing happens.
+             */
+            if (
+                "Notification" in window
+                &&
+                Notification.permission ===
+                    "granted"
+            ) {
+
+                let body =
+                    "You received a new message.";
+
+
+                if (
+                    message.type ===
+                    "TEXT"
+                    &&
+                    message.content
+                ) {
+
+                    body =
+                        message.content;
+
+                } else if (
+                    message.type ===
+                    "IMAGE"
+                ) {
+
+                    body =
+                        "Sent an image.";
+
+                } else if (
+                    message.type ===
+                    "FILE"
+                ) {
+
+                    body =
+                        `Sent a file${message.file?.originalName
+                            ? `: ${message.file.originalName}`
+                            : "."}`;
+
+                }
+
+
+                new Notification(
+                    message.senderName ||
+                    "New message",
+                    {
+                        body,
+
+                        tag:
+                            "chit-chat-message",
+
+                        icon:
+                            "/favicon.ico",
+                    }
+                );
+            }
+        },
+
+        /*
+         * Games callback.
+         */
+        () => {},
+
+        /*
+         * Game state callback.
+         */
+        () => {}
+    );
+
+
+    /*
+     * Ask for browser notification permission
+     * only after Chat is opened.
+     */
+    useEffect(() => {
+
+        if (
+            location.pathname !==
+            "/chat"
+        ) {
+            return;
+        }
+
+
+        if (
+            !("Notification" in window)
+        ) {
+            return;
+        }
+
+
+        if (
+            Notification.permission ===
+            "default"
+        ) {
+
+            Notification
+                .requestPermission()
+                .catch(() => {});
+        }
+
+    }, [location.pathname]);
+
+
+    /*
+     * Update browser tab title.
+     */
+    useEffect(() => {
+
+        if (
+            unreadCount > 0
+        ) {
+
+            document.title =
+                `(${unreadCount}) Chit Chat`;
+
+        } else {
+
+            document.title =
+                "Chit Chat";
+        }
+
+    }, [unreadCount]);
+
+
+    /*
+     * Reset unread count when:
+     *
+     * - user comes back to the browser tab
+     * - user focuses the browser window
+     * - user is on /chat
+     */
+    useEffect(() => {
+
+        function clearUnreadIfChatIsActive() {
+
+            const chatIsActive =
+                location.pathname ===
+                    "/chat"
+                &&
+                document.visibilityState ===
+                    "visible"
+                &&
+                document.hasFocus();
+
+
+            if (
+                chatIsActive
+            ) {
+
+                setUnreadCount(0);
+            }
+        }
+
+
+        function handleVisibilityChange() {
+
+            clearUnreadIfChatIsActive();
+        }
+
+
+        function handleFocus() {
+
+            clearUnreadIfChatIsActive();
+        }
+
+
+        document.addEventListener(
+            "visibilitychange",
+            handleVisibilityChange
+        );
+
+
+        window.addEventListener(
+            "focus",
+            handleFocus
+        );
+
+
+        return () => {
+
+            document.removeEventListener(
+                "visibilitychange",
+                handleVisibilityChange
+            );
+
+
+            window.removeEventListener(
+                "focus",
+                handleFocus
+            );
+        };
+
+    }, [location.pathname]);
+
+
+    /*
+     * When the user navigates directly back to /chat
+     * while the browser is focused, clear unread.
+     */
+    useEffect(() => {
+
+        if (
+            location.pathname ===
+                "/chat"
+            &&
+            document.visibilityState ===
+                "visible"
+            &&
+            document.hasFocus()
+        ) {
+
+            setUnreadCount(0);
+        }
+
+    }, [location.pathname]);
+
+
     return (
         <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
 
@@ -286,11 +621,25 @@ function Shell({
                         to="/chat"
                         className="navlink"
                     >
+
                         <MessageCircle
                             size={18}
                         />
 
                         Chat
+
+                        {unreadCount > 0 && (
+
+                            <span
+                                className="ml-1 inline-flex min-w-[20px] h-5 px-1 items-center justify-center rounded-full bg-red-500 text-white text-[11px] font-bold"
+                            >
+                                {unreadCount > 99
+                                    ? "99+"
+                                    : unreadCount}
+                            </span>
+
+                        )}
+
                     </Link>
 
 
@@ -298,11 +647,13 @@ function Shell({
                         to="/games"
                         className="navlink"
                     >
+
                         <Gamepad2
                             size={18}
                         />
 
                         Games
+
                     </Link>
 
 
@@ -313,12 +664,15 @@ function Shell({
                             to="/admin"
                             className="navlink"
                         >
+
                             <ShieldCheck
                                 size={18}
                             />
 
                             Admin
+
                         </Link>
+
                     )}
 
                 </nav>
@@ -333,11 +687,13 @@ function Shell({
                             setDark(!dark)
                         }
                     >
+
                         {dark ? (
                             <Sun size={18} />
                         ) : (
                             <Moon size={18} />
                         )}
+
                     </button>
 
 
@@ -346,9 +702,11 @@ function Shell({
                         title="Logout"
                         onClick={onLogout}
                     >
+
                         <LogOut
                             size={18}
                         />
+
                     </button>
 
                 </div>
@@ -368,14 +726,22 @@ function Shell({
                     }
                 />
 
+
                 <Route
                     path="/chat"
                     element={
                         <ChatPage
                             user={user}
+                            incomingMessage={
+                                incomingMessage
+                            }
+                            connected={
+                                connected
+                            }
                         />
                     }
                 />
+
 
                 <Route
                     path="/games"
@@ -386,6 +752,7 @@ function Shell({
                     }
                 />
 
+
                 <Route
                     path="/games/:id"
                     element={
@@ -395,6 +762,7 @@ function Shell({
                     }
                 />
 
+
                 <Route
                     path="/admin"
                     element={
@@ -403,6 +771,7 @@ function Shell({
                         />
                     }
                 />
+
 
                 <Route
                     path="*"
