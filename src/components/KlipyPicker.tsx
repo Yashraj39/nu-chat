@@ -4,7 +4,6 @@ import { sendMedia } from "../api";
 
 type Kind = "GIF" | "STICKER";
 type Item = { id: string; title?: string; media_formats?: Record<string, { url?: string; preview?: string; dims?: number[] }>; };
-
 const KEY = import.meta.env.VITE_KLIPY_API_KEY as string | undefined;
 const BASE = "https://api.klipy.com";
 
@@ -16,40 +15,42 @@ function media(item: Item, kind: Kind) {
     return first ? { url: first.url!, previewUrl: first.preview || first.url!, dims: first.dims || [] } : null;
 }
 
-export function KlipyPicker({ onClose, onSend }: { onClose: () => void; onSend: (message: any) => Promise<void> }) {
+export function KlipyPicker({ onClose, replyToMessageId }: { onClose: () => void; replyToMessageId?: string }) {
     const [kind, setKind] = useState<Kind>("GIF");
     const [query, setQuery] = useState("");
     const [items, setItems] = useState<Item[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
+    const [sending, setSending] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
         async function load() {
-            if (!KEY) { setError("KLIPY is not configured. Add VITE_KLIPY_API_KEY."); setLoading(false); return; }
+            if (!KEY) { setError("KLIPY is not configured. Add VITE_KLIPY_API_KEY to your environment variables."); setLoading(false); return; }
             setLoading(true); setError("");
             try {
                 const params = new URLSearchParams({ key: KEY, limit: "24", contentfilter: "high", media_filter: kind === "STICKER" ? "webp,tinywebp,gif,tinygif" : "gif,mediumgif,tinygif" });
-                if (query.trim()) { params.set("q", query.trim()); if (kind === "STICKER") params.set("searchfilter", "sticker"); }
-                else if (kind === "STICKER") params.set("searchfilter", "sticker");
-                const endpoint = query.trim() ? "/v2/search" : "/v2/featured";
-                const response = await fetch(`${BASE}${endpoint}?${params}`);
+                if (query.trim()) params.set("q", query.trim());
+                if (kind === "STICKER") params.set("searchfilter", "sticker");
+                const response = await fetch(`${BASE}${query.trim() ? "/v2/search" : "/v2/featured"}?${params}`);
                 if (!response.ok) throw new Error(`KLIPY returned ${response.status}`);
                 const data = await response.json();
                 if (!cancelled) setItems(data.results || []);
-            } catch (e: any) {
-                if (!cancelled) setError(e.message || "Unable to load GIFs.");
-            } finally { if (!cancelled) setLoading(false); }
+            } catch (e: any) { if (!cancelled) setError(e.message || "Unable to load GIFs."); }
+            finally { if (!cancelled) setLoading(false); }
         }
         const timer = window.setTimeout(load, query.trim() ? 350 : 0);
         return () => { cancelled = true; window.clearTimeout(timer); };
     }, [kind, query]);
 
     async function choose(item: Item) {
-        const m = media(item, kind); if (!m) return;
+        const m = media(item, kind); if (!m || sending) return;
         const [width, height] = m.dims;
-        await sendMedia({ type: kind, provider: "KLIPY", providerId: item.id, title: item.title, url: m.url, previewUrl: m.previewUrl, width, height });
-        onClose();
+        try {
+            setSending(true);
+            await sendMedia({ type: kind, provider: "KLIPY", providerId: item.id, title: item.title, url: m.url, previewUrl: m.previewUrl, width, height }, replyToMessageId);
+            onClose();
+        } catch (e: any) { setError(e.response?.data?.message || "Unable to send media."); setSending(false); }
     }
 
     return <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-3" onMouseDown={onClose}>
@@ -65,7 +66,7 @@ export function KlipyPicker({ onClose, onSend }: { onClose: () => void; onSend: 
             <div className="p-3 overflow-y-auto max-h-[65vh]">
                 {error && <div className="error mb-3">{error}</div>}
                 {loading ? <div className="py-12 text-center muted">Loading…</div> : <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                    {items.map(item => { const m = media(item, kind); return m ? <button key={item.id} onClick={() => choose(item)} className="overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800 hover:ring-2 hover:ring-indigo-400 transition"><img src={m.previewUrl} alt={item.title || kind} loading="lazy" className="w-full h-28 object-contain" /></button> : null; })}
+                    {items.map(item => { const m = media(item, kind); return m ? <button key={item.id} disabled={sending} onClick={() => choose(item)} className="overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800 hover:ring-2 hover:ring-indigo-400 transition"><img src={m.previewUrl} alt={item.title || kind} loading="lazy" className="w-full h-28 object-contain" /></button> : null; })}
                 </div>}
                 {!loading && !error && items.length === 0 && <div className="py-12 text-center muted">No results found.</div>}
                 <div className="pt-3 text-center text-[10px] muted">Powered by KLIPY</div>
