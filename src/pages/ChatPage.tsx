@@ -6,6 +6,7 @@ import {
     FileAudio,
     FileImage,
     FileText,
+    FileVideo,
     Paperclip,
     Reply,
     Send,
@@ -67,7 +68,10 @@ export function ChatPage({
 
     useEffect(() => {
         messages()
-            .then(setMsgs)
+            .then((loaded) => {
+                setMsgs(loaded);
+                requestAnimationFrame(() => scrollToBottom("auto"));
+            })
             .catch(() => setError("Unable to load messages."));
     }, []);
 
@@ -91,9 +95,6 @@ export function ChatPage({
 
         const observer = new ResizeObserver(() => {
             if (!stickToBottomRef.current) return;
-
-            // GIFs, stickers, images and media can change the list height
-            // after the message was inserted. Always follow the real bottom.
             container.scrollTop = container.scrollHeight;
         });
 
@@ -236,7 +237,6 @@ export function ChatPage({
                             />
                         </div>
                     ))}
-
                     <div ref={end} />
                 </div>
 
@@ -246,7 +246,12 @@ export function ChatPage({
                         onClick={() => {
                             stickToBottomRef.current = true;
                             setNearBottom(true);
-                            requestAnimationFrame(() => scrollToBottom());
+                            requestAnimationFrame(() =>
+                                end.current?.scrollIntoView({
+                                    behavior: "smooth",
+                                    block: "end",
+                                })
+                            );
                         }}
                     >
                         <ArrowDown size={15} />
@@ -307,14 +312,14 @@ export function ChatPage({
                     <textarea
                         id="chat-composer"
                         value={text}
-                        onChange={(event) => setText(event.target.value)}
-                        onKeyDown={(event) => {
-                            if (event.key === "Enter" && !event.shiftKey) {
-                                event.preventDefault();
+                        onChange={(e) => setText(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey) {
+                                e.preventDefault();
                                 submit();
                             }
 
-                            if (event.key === "Escape" && replyingTo) {
+                            if (e.key === "Escape" && replyingTo) {
                                 cancelReply();
                             }
                         }}
@@ -371,7 +376,6 @@ function ReplyComposerPreview({
                     {messagePreview(message)}
                 </div>
             </button>
-
             <button
                 type="button"
                 className="iconbtn"
@@ -405,12 +409,9 @@ function MessageBubble({
         hour: "numeric",
         minute: "2-digit",
     });
-
     const file = m.file;
     const media = m.media;
-    const mime =
-        file?.mimeType?.toLowerCase() || "application/octet-stream";
-
+    const mime = file?.mimeType?.toLowerCase() || "application/octet-stream";
     const isRasterImage = [
         "image/jpeg",
         "image/png",
@@ -419,7 +420,6 @@ function MessageBubble({
         "image/bmp",
         "image/avif",
     ].includes(mime);
-
     const isVideo = mime.startsWith("video/");
     const isAudio = mime.startsWith("audio/");
 
@@ -427,8 +427,9 @@ function MessageBubble({
         <div className={`msgrow ${own ? "own" : ""}`}>
             <article className={`bubble ${own ? "ownbubble" : ""}`}>
                 <div className="flex items-center justify-between gap-3">
-                    <span className="sender">{own ? "You" : m.senderName}</span>
-
+                    <span className="sender">
+                        {own ? "You" : m.senderName}
+                    </span>
                     <div className="flex items-center gap-1">
                         <button
                             className="tiny"
@@ -437,7 +438,6 @@ function MessageBubble({
                         >
                             <Reply size={14} />
                         </button>
-
                         {canDelete && !m.deleted && (
                             <button
                                 className="tiny"
@@ -473,11 +473,7 @@ function MessageBubble({
                     <p className="muted">File metadata is unavailable.</p>
                 ) : isRasterImage ? (
                     <div>
-                        <a
-                            href={file.url}
-                            target="_blank"
-                            rel="noreferrer"
-                        >
+                        <a href={file.url} target="_blank" rel="noreferrer">
                             <img
                                 className="chat-image"
                                 src={file.url}
@@ -588,9 +584,7 @@ function ReplyQuote({
                 {reply.senderName}
             </div>
             <div className="text-xs muted truncate mt-0.5">
-                {reply.deleted
-                    ? "This message was deleted"
-                    : replyPreview(reply)}
+                {reply.deleted ? "This message was deleted" : replyPreview(reply)}
             </div>
         </button>
     );
@@ -599,9 +593,7 @@ function ReplyQuote({
 function messagePreview(message: Message) {
     if (message.deleted) return "This message was deleted";
     if (message.type === "TEXT") return message.content || "Message";
-    if (message.type === "IMAGE") {
-        return `📷 ${message.file?.originalName || "Photo"}`;
-    }
+    if (message.type === "IMAGE") return `📷 ${message.file?.originalName || "Photo"}`;
     if (message.type === "GIF") return "🎞️ GIF";
     if (message.type === "STICKER") return "🏷️ Sticker";
     return `📎 ${message.file?.originalName || "File"}`;
@@ -641,9 +633,7 @@ function FileCard({
             popup.location.href = url;
         } catch {
             popup.close();
-            window.alert(
-                "Unable to download this file. Please try again."
-            );
+            window.alert("Unable to download this file. Please try again.");
         } finally {
             setDownloading(false);
         }
@@ -690,8 +680,7 @@ function getFileIcon(mime: string) {
 function formatFileSize(size: number) {
     if (size < 1024) return `${size} B`;
     if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-    if (size < 1024 * 1024 * 1024) {
+    if (size < 1024 * 1024 * 1024)
         return `${(size / (1024 * 1024)).toFixed(2)} MB`;
-    }
     return `${(size / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
