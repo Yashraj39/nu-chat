@@ -7,6 +7,33 @@ const WS =
         ? "wss://nu-chat.onrender.com/ws"
         : "ws://localhost:8080/ws");
 
+function isJwtExpired(token: string): boolean {
+    try {
+        const parts = token.split(".");
+        if (parts.length !== 3) return true;
+
+        const payload = JSON.parse(
+            atob(
+                parts[1]
+                    .replace(/-/g, "+")
+                    .replace(/_/g, "/")
+                    .padEnd(Math.ceil(parts[1].length / 4) * 4, "=")
+            )
+        );
+
+        return typeof payload.exp !== "number" ||
+            payload.exp * 1000 <= Date.now();
+    } catch {
+        return true;
+    }
+}
+
+function expireSession() {
+    localStorage.removeItem("pulse_token");
+    localStorage.removeItem("pulse_user");
+    window.dispatchEvent(new Event("pulse:session-expired"));
+}
+
 export function useSocket(
     onChat: (x: any) => void,
     onGames: (x: any) => void,
@@ -42,6 +69,13 @@ export function useSocket(
             return;
         }
 
+        // Do not even open a WebSocket with an already-expired JWT.
+        if (isJwtExpired(token)) {
+            expireSession();
+            setConnected(false);
+            return;
+        }
+
         const client = new Client({
             brokerURL: WS,
 
@@ -72,16 +106,12 @@ export function useSocket(
 
             subscriptionsRef.current = [];
 
-            /*
-             * Chat updates
-             */
             subscriptionsRef.current.push(
                 client.subscribe(
                     "/topic/chat",
                     (message: IMessage) => {
                         try {
-                            const data = JSON.parse(message.body);
-                            onChatRef.current(data);
+                            onChatRef.current(JSON.parse(message.body));
                         } catch (error) {
                             console.error(
                                 "Invalid chat WebSocket message:",
@@ -92,16 +122,12 @@ export function useSocket(
                 )
             );
 
-            /*
-             * Game room list updates
-             */
             subscriptionsRef.current.push(
                 client.subscribe(
                     "/topic/games",
                     (message: IMessage) => {
                         try {
-                            const data = JSON.parse(message.body);
-                            onGamesRef.current(data);
+                            onGamesRef.current(JSON.parse(message.body));
                         } catch (error) {
                             console.error(
                                 "Invalid game WebSocket message:",
@@ -112,16 +138,12 @@ export function useSocket(
                 )
             );
 
-            /*
- * Game room deletion updates
- */
             subscriptionsRef.current.push(
                 client.subscribe(
                     "/topic/game/rooms/remove",
                     (message: IMessage) => {
                         try {
                             const data = JSON.parse(message.body);
-
                             onGamesRef.current({
                                 type: "ROOM_REMOVED",
                                 roomId: String(data),
@@ -136,17 +158,13 @@ export function useSocket(
                 )
             );
 
-            /*
-             * Individual game room updates
-             */
             if (roomId) {
                 subscriptionsRef.current.push(
                     client.subscribe(
                         `/topic/game/${roomId}`,
                         (message: IMessage) => {
                             try {
-                                const data = JSON.parse(message.body);
-                                onGamesRef.current(data);
+                                onGamesRef.current(JSON.parse(message.body));
                             } catch (error) {
                                 console.error(
                                     "Invalid room WebSocket message:",
@@ -157,21 +175,12 @@ export function useSocket(
                     )
                 );
 
-                /*
-                 * Game state updates.
-                 *
-                 * This is especially important for Snake because
-                 * the server should continuously publish the updated
-                 * Snake position here.
-                 */
                 subscriptionsRef.current.push(
                     client.subscribe(
                         `/topic/game/${roomId}/state`,
                         (message: IMessage) => {
                             try {
-                                const data = JSON.parse(message.body);
-
-                                onGameStateRef.current(data);
+                                onGameStateRef.current(JSON.parse(message.body));
                             } catch (error) {
                                 console.error(
                                     "Invalid game-state WebSocket message:",
@@ -198,11 +207,6 @@ export function useSocket(
             setConnected(false);
         };
 
-        client.onWebSocketClose = (event) => {
-            console.log("WebSocket closed:", event);
-            setConnected(false);
-        };
-
         client.onStompError = (frame) => {
             console.error(
                 "STOMP error:",
@@ -211,10 +215,21 @@ export function useSocket(
             );
 
             setConnected(false);
+
+            // Only treat an explicit authentication error as a dead session.
+            const text = `${frame.headers["message"] || ""} ${frame.body || ""}`.toLowerCase();
+            if (
+                text.includes("invalid") && text.includes("token") ||
+                text.includes("expired") && text.includes("token") ||
+                text.includes("missing websocket token") ||
+                text.includes("authentication required") ||
+                text.includes("session is no longer valid")
+            ) {
+                expireSession();
+            }
         };
 
         client.activate();
-
         clientRef.current = client;
 
         return () => {
