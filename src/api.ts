@@ -10,6 +10,7 @@ client.interceptors.request.use((config) => {
 }, (error) => Promise.reject(error));
 client.interceptors.response.use((response) => response, (error) => {
     if (error?.response?.status === 401) window.dispatchEvent(new Event("pulse:session-expired"));
+    if (error?.response?.status === 409) window.dispatchEvent(new Event("pulse:name-taken"));
     return Promise.reject(error);
 });
 
@@ -19,7 +20,22 @@ export async function join(name: string, adminCode: string) {
     localStorage.setItem("pulse_user", JSON.stringify(response.data.user));
     return response.data.user;
 }
-export function logout() { localStorage.removeItem("pulse_token"); localStorage.removeItem("pulse_user"); }
+
+export async function heartbeat() {
+    await client.post("/api/auth/heartbeat");
+}
+
+export async function logout() {
+    try {
+        if (localStorage.getItem("pulse_token")) {
+            await client.post("/api/auth/logout");
+        }
+    } finally {
+        localStorage.removeItem("pulse_token");
+        localStorage.removeItem("pulse_user");
+    }
+}
+
 export async function messages() { return (await client.get("/api/messages")).data; }
 export async function sendText(content: string, replyToMessageId?: string) {
     return (await client.post("/api/messages", { content: content.trim(), ...(replyToMessageId ? { replyToMessageId } : {}) })).data;
