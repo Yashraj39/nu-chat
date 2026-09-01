@@ -26,6 +26,7 @@ import type { Message } from "./types";
 import {
     join,
     logout,
+    heartbeat,
 } from "./api";
 
 import {
@@ -54,7 +55,6 @@ export function App() {
             const token = localStorage.getItem("pulse_token");
             const storedUser = localStorage.getItem("pulse_user");
 
-            // A stored user without a token is not a valid session.
             if (!token || !storedUser) {
                 return null;
             }
@@ -67,29 +67,44 @@ export function App() {
 
     const [dark, setDark] = useTheme();
 
-    /*
-     * Any authenticated API call that receives 401 reaches this event.
-     * Clear the browser session immediately so an old/deleted/expired
-     * JWT can never leave the app stuck on the chat screen.
-     */
     useEffect(() => {
         function handleSessionExpired() {
-            logout();
-            setUser(null);
+            void logout().finally(() => setUser(null));
         }
 
-        window.addEventListener(
-            "pulse:session-expired",
-            handleSessionExpired
-        );
+        window.addEventListener("pulse:session-expired", handleSessionExpired);
 
         return () => {
-            window.removeEventListener(
-                "pulse:session-expired",
-                handleSessionExpired
-            );
+            window.removeEventListener("pulse:session-expired", handleSessionExpired);
         };
     }, []);
+
+    // Keep the active display-name lease alive while the app is open.
+    // The backend expires a lease automatically when these heartbeats stop.
+    useEffect(() => {
+        if (!user) return;
+
+        let stopped = false;
+
+        async function beat() {
+            try {
+                await heartbeat();
+            } catch (error: any) {
+                if (stopped) return;
+                if (error?.response?.status === 401 || error?.response?.status === 409) {
+                    void logout().finally(() => setUser(null));
+                }
+            }
+        }
+
+        void beat();
+        const timer = window.setInterval(() => void beat(), 30_000);
+
+        return () => {
+            stopped = true;
+            window.clearInterval(timer);
+        };
+    }, [user]);
 
     if (!user) {
         return <JoinPage onJoined={setUser} />;
@@ -100,17 +115,13 @@ export function App() {
             user={user}
             dark={dark}
             setDark={setDark}
-            onLogout={() => {
-                logout();
+            onLogout={async () => {
+                await logout();
                 setUser(null);
             }}
         />
     );
 }
-
-/* ============================================================
-   JOIN
-   ============================================================ */
 
 function JoinPage({
     onJoined,
@@ -122,14 +133,23 @@ function JoinPage({
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
 
+    useEffect(() => {
+        function handleNameTaken() {
+            setError("That name is already in use. Please choose another name.");
+        }
+
+        window.addEventListener("pulse:name-taken", handleNameTaken);
+        return () => window.removeEventListener("pulse:name-taken", handleNameTaken);
+    }, []);
+
     async function go(event: React.FormEvent) {
         event.preventDefault();
         setBusy(true);
         setError("");
 
         try {
-            const user = await join(name, code);
-            onJoined(user);
+            const joinedUser = await join(name, code);
+            onJoined(joinedUser);
         } catch (error: any) {
             setError(
                 error?.response?.data?.message ||
@@ -189,10 +209,6 @@ function JoinPage({
     );
 }
 
-/* ============================================================
-   SHELL
-   ============================================================ */
-
 function Shell({
     user,
     dark,
@@ -202,7 +218,7 @@ function Shell({
     user: any;
     dark: boolean;
     setDark: (value: boolean) => void;
-    onLogout: () => void;
+    onLogout: () => void | Promise<void>;
 }) {
     const location = useLocation();
 
@@ -243,6 +259,10 @@ function Shell({
                     body = `Sent a file${message.file?.originalName
                         ? `: ${message.file.originalName}`
                         : "."}`;
+                } else if (message.type === "GIF") {
+                    body = "Sent a GIF.";
+                } else if (message.type === "STICKER") {
+                    body = "Sent a sticker.";
                 }
 
                 new Notification(
@@ -287,24 +307,12 @@ function Shell({
             }
         }
 
-        document.addEventListener(
-            "visibilitychange",
-            clearUnreadIfChatIsActive
-        );
-        window.addEventListener(
-            "focus",
-            clearUnreadIfChatIsActive
-        );
+        document.addEventListener("visibilitychange", clearUnreadIfChatIsActive);
+        window.addEventListener("focus", clearUnreadIfChatIsActive);
 
         return () => {
-            document.removeEventListener(
-                "visibilitychange",
-                clearUnreadIfChatIsActive
-            );
-            window.removeEventListener(
-                "focus",
-                clearUnreadIfChatIsActive
-            );
+            document.removeEventListener("visibilitychange", clearUnreadIfChatIsActive);
+            window.removeEventListener("focus", clearUnreadIfChatIsActive);
         };
     }, [location.pathname]);
 
@@ -362,7 +370,7 @@ function Shell({
                     <button
                         className="iconbtn"
                         title="Logout"
-                        onClick={onLogout}
+                        onClick={() => void onLogout()}
                     >
                         <LogOut size={18} />
                     </button>
@@ -370,41 +378,12 @@ function Shell({
             </header>
 
             <Routes>
-                <Route
-                    path="/"
-                    element={<Navigate to="/chat" replace />}
-                />
-
-                <Route
-                    path="/chat"
-                    element={
-                        <ChatPage
-                            user={user}
-                            incomingMessage={incomingMessage}
-                            connected={connected}
-                        />
-                    }
-                />
-
-                <Route
-                    path="/games"
-                    element={<GamesPage user={user} />}
-                />
-
-                <Route
-                    path="/games/:id"
-                    element={<GameRoomPage user={user} />}
-                />
-
-                <Route
-                    path="/admin"
-                    element={<AdminPage user={user} />}
-                />
-
-                <Route
-                    path="*"
-                    element={<Navigate to="/chat" replace />}
-                />
+                <Route path="/" element={<Navigate to="/chat" replace />} />
+                <Route path="/chat" element={<ChatPage user={user} incomingMessage={incomingMessage} connected={connected} />} />
+                <Route path="/games" element={<GamesPage user={user} />} />
+                <Route path="/games/:id" element={<GameRoomPage user={user} />} />
+                <Route path="/admin" element={<AdminPage user={user} />} />
+                <Route path="*" element={<Navigate to="/chat" replace />} />
             </Routes>
         </div>
     );
