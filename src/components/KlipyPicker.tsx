@@ -69,7 +69,6 @@ export function KlipyPicker({ onClose, replyToMessageId }: { onClose: () => void
                     {items.map(item => { const m = media(item, kind); return m ? <button key={item.id} disabled={sending} onClick={() => choose(item)} className="overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800 hover:ring-2 hover:ring-indigo-400 transition"><img src={m.previewUrl} alt={item.title || kind} loading="lazy" className="w-full h-28 object-contain" /></button> : null; })}
                 </div>}
                 {!loading && !error && items.length === 0 && <div className="py-12 text-center muted">No results found.</div>}
-                <div className="pt-3 text-center text-[10px] muted">Powered by KLIPY</div>
             </div>
         </section>
     </div>;
