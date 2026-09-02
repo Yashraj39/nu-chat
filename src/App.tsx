@@ -180,6 +180,7 @@ function JoinPage({
                     className="input"
                     placeholder="Your display name"
                     maxLength={32}
+                    minLength={1}
                     value={name}
                     onChange={(event) => setName(event.target.value)}
                 />
@@ -200,7 +201,7 @@ function JoinPage({
 
                 <button
                     className="btn-primary w-full"
-                    disabled={busy || name.trim().length < 2}
+                    disabled={busy || name.trim().length < 1}
                 >
                     {busy ? "Joining…" : "Join Chat"}
                 </button>
