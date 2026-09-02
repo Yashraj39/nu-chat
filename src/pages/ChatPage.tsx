@@ -48,7 +48,17 @@ export function ChatPage({
     const end = useRef<HTMLDivElement>(null);
     const list = useRef<HTMLDivElement>(null);
     const stickToBottomRef = useRef(true);
+    const initializingRef = useRef(true);
     const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+    useEffect(() => {
+        const previousRestoration = window.history.scrollRestoration;
+        window.history.scrollRestoration = "manual";
+
+        return () => {
+            window.history.scrollRestoration = previousRestoration;
+        };
+    }, []);
 
     useEffect(() => {
         if (!incomingMessage) return;
@@ -67,12 +77,53 @@ export function ChatPage({
     }, [incomingMessage]);
 
     useEffect(() => {
+        let cancelled = false;
+
+        stickToBottomRef.current = true;
+        initializingRef.current = true;
+
         messages()
             .then((loaded) => {
+                if (cancelled) return;
+
                 setMsgs(loaded);
-                requestAnimationFrame(() => scrollToBottom("auto"));
+
+                // Force the initial position to the latest message. Multiple
+                // frames/ticks are used because message content and media can
+                // increase the scroll height after the first render.
+                const forceInitialBottom = () => {
+                    const container = list.current;
+                    if (!container) return;
+
+                    stickToBottomRef.current = true;
+                    container.scrollTop = container.scrollHeight;
+                    end.current?.scrollIntoView({ behavior: "auto", block: "end" });
+                };
+
+                requestAnimationFrame(() => {
+                    forceInitialBottom();
+                    requestAnimationFrame(() => {
+                        forceInitialBottom();
+                        window.setTimeout(forceInitialBottom, 50);
+                        window.setTimeout(forceInitialBottom, 150);
+                        window.setTimeout(() => {
+                            forceInitialBottom();
+                            initializingRef.current = false;
+                            setNearBottom(true);
+                        }, 400);
+                    });
+                });
             })
-            .catch(() => setError("Unable to load messages."));
+            .catch(() => {
+                if (!cancelled) {
+                    initializingRef.current = false;
+                    setError("Unable to load messages.");
+                }
+            });
+
+        return () => {
+            cancelled = true;
+        };
     }, []);
 
     function scrollToBottom(behavior: ScrollBehavior = "smooth") {
@@ -86,6 +137,7 @@ export function ChatPage({
     }
 
     useEffect(() => {
+        if (initializingRef.current) return;
         scrollToBottom();
     }, [msgs]);
 
@@ -116,7 +168,7 @@ export function ChatPage({
 
     function handleScroll() {
         const container = list.current;
-        if (!container) return;
+        if (!container || initializingRef.current) return;
 
         const distanceFromBottom =
             container.scrollHeight -
@@ -215,6 +267,7 @@ export function ChatPage({
                     ref={list}
                     onScroll={handleScroll}
                     className="message-list"
+                    style={{ overflowAnchor: "none" }}
                 >
                     {msgs.map((message) => (
                         <div
