@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link2, Search, Upload, X } from "lucide-react";
-import { savedMedia, sendMediaLink, sendSavedMedia } from "../api";
+import { Link2, Search, Send, X } from "lucide-react";
+import { savedMedia, sendMedia, sendMediaLink, sendSavedMedia } from "../api";
 import type { SavedMedia } from "../types";
 
 type Kind = "GIF" | "STICKER";
 type Tab = Kind | "LINKS";
+type DirectKind = "AUTO" | "GIF" | "IMAGE" | "VIDEO";
 type Item = {
     id: string;
     title?: string;
@@ -13,6 +14,7 @@ type Item = {
 
 const KEY = import.meta.env.VITE_KLIPY_API_KEY as string | undefined;
 const BASE = "https://api.klipy.com";
+const STARTER_GIF = "https://static.klipy.com/ii/d6b0ce929193df3c242ac34b5654d2ce/d8/71/iaYWp9nI.gif";
 
 function media(item: Item, kind: Kind) {
     const formats = item.media_formats || {};
@@ -36,8 +38,13 @@ function media(item: Item, kind: Kind) {
         : null;
 }
 
-function isVideo(saved: SavedMedia) {
-    return saved.mimeType?.startsWith("video/") || saved.kind === "VIDEO";
+function directKind(url: string): DirectKind {
+    const clean = url.split("?")[0].split("#")[0].toLowerCase();
+    const ext = clean.includes(".") ? clean.substring(clean.lastIndexOf(".") + 1) : "";
+    if (ext === "gif") return "GIF";
+    if (["jpg", "jpeg", "png", "webp", "bmp", "avif", "svg"].includes(ext)) return "IMAGE";
+    if (["mp4", "webm", "mov", "m4v", "ogv"].includes(ext)) return "VIDEO";
+    return "AUTO";
 }
 
 function SavedTile({
@@ -49,16 +56,17 @@ function SavedTile({
     onClick: () => void;
     disabled: boolean;
 }) {
+    const video = item.kind === "VIDEO" || item.mimeType?.startsWith("video/");
+
     return (
         <button
-            key={item.id}
             type="button"
             disabled={disabled}
             onClick={onClick}
             title={`${item.title || "Saved media"} • sent ${item.sentCount} time${item.sentCount === 1 ? "" : "s"}`}
             className="relative overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800 hover:ring-2 hover:ring-indigo-400 transition disabled:opacity-60"
         >
-            {isVideo(item) ? (
+            {video ? (
                 <video
                     src={item.url}
                     muted
@@ -83,6 +91,24 @@ function SavedTile({
     );
 }
 
+function DirectPreview({ url, kind }: { url: string; kind: DirectKind }) {
+    if (!url || kind === "AUTO") return null;
+
+    if (kind === "VIDEO") {
+        return (
+            <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2">
+                <video src={url} controls preload="metadata" className="max-h-48 w-full rounded-lg" />
+            </div>
+        );
+    }
+
+    return (
+        <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2">
+            <img src={url} alt="Media preview" className="mx-auto max-h-48 max-w-full object-contain rounded-lg" />
+        </div>
+    );
+}
+
 export function KlipyPicker({
     onClose,
     replyToMessageId,
@@ -99,6 +125,7 @@ export function KlipyPicker({
     const [error, setError] = useState("");
     const [sending, setSending] = useState(false);
     const [link, setLink] = useState("");
+    const [directKind, setDirectKind] = useState<DirectKind>("AUTO");
 
     const kind: Kind = tab === "STICKER" ? "STICKER" : "GIF";
 
@@ -183,16 +210,18 @@ export function KlipyPicker({
         try {
             setSending(true);
             setError("");
-            await sendMediaLink(
-                {
-                    type: kind,
-                    provider: "KLIPY",
-                    providerId: item.id,
-                    title: item.title,
-                    url: selected.url,
-                },
-                replyToMessageId
-            );
+            // Send the exact CDN URL. No Cloudinary import, proxy, or URL rewrite.
+            await sendMedia({
+                type: kind,
+                provider: "KLIPY",
+                providerId: item.id,
+                title: item.title,
+                url: selected.url,
+                previewUrl: selected.previewUrl,
+                width: selected.dims[0],
+                height: selected.dims[1],
+                mimeType: kind === "GIF" ? "image/gif" : "image/webp",
+            }, replyToMessageId);
             onClose();
         } catch (e: any) {
             setError(e.response?.data?.message || "Unable to send media.");
@@ -228,16 +257,34 @@ export function KlipyPicker({
             return;
         }
 
+        const inferred = directKind(value);
+        const selectedKind = directKind === "AUTO" ? inferred : directKind;
+        if (selectedKind === "AUTO") {
+            setError("This URL has no recognizable media extension. Choose GIF, Image, or Video manually.");
+            return;
+        }
+
         try {
             setSending(true);
             setError("");
-            await sendMediaLink({ url: value, provider: "LINK" }, replyToMessageId);
+            await sendMediaLink({
+                url: value,
+                type: selectedKind === "GIF" ? "GIF" : undefined,
+                provider: "LINK",
+            }, replyToMessageId);
+            setSaved((current) => current);
             setLink("");
             onClose();
         } catch (e: any) {
-            setError(e.response?.data?.message || "Unable to import that media link.");
+            setError(e.response?.data?.message || "Unable to send that direct media link.");
             setSending(false);
         }
+    }
+
+    function starterGif() {
+        void sendMediaLink({ url: STARTER_GIF, type: "GIF", provider: "LINK", title: "Starter GIF" }, replyToMessageId)
+            .then(() => onClose())
+            .catch((e: any) => setError(e.response?.data?.message || "Unable to send starter GIF."));
     }
 
     return (
@@ -245,10 +292,10 @@ export function KlipyPicker({
             <section className="w-full max-w-2xl max-h-[80vh] overflow-hidden rounded-2xl bg-white dark:bg-slate-900 shadow-2xl" onMouseDown={(e) => e.stopPropagation()}>
                 <header className="border-b border-slate-200 dark:border-slate-700 p-3 space-y-3">
                     <div className="flex items-center gap-2">
-                        <div className="flex rounded-lg bg-slate-100 dark:bg-slate-800 p-1">
-                            <button type="button" className={`px-3 py-1.5 rounded-md text-sm ${tab === "GIF" ? "bg-white dark:bg-slate-700 shadow" : "muted"}`} onClick={() => switchTab("GIF")}>GIFs</button>
-                            <button type="button" className={`px-3 py-1.5 rounded-md text-sm ${tab === "STICKER" ? "bg-white dark:bg-slate-700 shadow" : "muted"}`} onClick={() => switchTab("STICKER")}>Stickers</button>
-                            <button type="button" className={`px-3 py-1.5 rounded-md text-sm ${tab === "LINKS" ? "bg-white dark:bg-slate-700 shadow" : "muted"}`} onClick={() => switchTab("LINKS")}>My Links</button>
+                        <div className="flex rounded-lg bg-slate-100 dark:bg-slate-800 p-1 overflow-x-auto">
+                            <button type="button" className={`px-3 py-1.5 rounded-md text-sm whitespace-nowrap ${tab === "GIF" ? "bg-white dark:bg-slate-700 shadow" : "muted"}`} onClick={() => switchTab("GIF")}>GIFs</button>
+                            <button type="button" className={`px-3 py-1.5 rounded-md text-sm whitespace-nowrap ${tab === "STICKER" ? "bg-white dark:bg-slate-700 shadow" : "muted"}`} onClick={() => switchTab("STICKER")}>Stickers</button>
+                            <button type="button" className={`px-3 py-1.5 rounded-md text-sm whitespace-nowrap ${tab === "LINKS" ? "bg-white dark:bg-slate-700 shadow" : "muted"}`} onClick={() => switchTab("LINKS")}>Direct Links</button>
                         </div>
                         <button className="iconbtn ml-auto" onClick={onClose} title="Close"><X size={20} /></button>
                     </div>
@@ -259,15 +306,26 @@ export function KlipyPicker({
                             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`Search ${kind.toLowerCase()}…`} className="w-full rounded-lg bg-slate-100 dark:bg-slate-800 py-2 pl-9 pr-3 outline-none" autoFocus />
                         </div>
                     ) : (
-                        <div className="flex gap-2">
-                            <div className="relative flex-1">
-                                <Link2 className="absolute left-3 top-2.5 muted" size={17} />
-                                <input value={link} onChange={(e) => setLink(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void submitLink(); } }} placeholder="Paste an image, GIF, or video link…" className="w-full rounded-lg bg-slate-100 dark:bg-slate-800 py-2 pl-9 pr-3 outline-none" autoFocus />
+                        <>
+                            <div className="flex gap-2">
+                                <div className="relative flex-1">
+                                    <Link2 className="absolute left-3 top-2.5 muted" size={17} />
+                                    <input value={link} onChange={(e) => { setLink(e.target.value); if (directKind === "AUTO") setDirectKind(directKind(e.target.value)); }} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void submitLink(); } }} placeholder="Paste a direct image, GIF, or video URL…" className="w-full rounded-lg bg-slate-100 dark:bg-slate-800 py-2 pl-9 pr-3 outline-none" autoFocus />
+                                </div>
+                                <button type="button" className="btn-primary" disabled={!link.trim() || sending} onClick={() => void submitLink()}>
+                                    <Send size={16} /> Send
+                                </button>
                             </div>
-                            <button type="button" className="btn-primary" disabled={!link.trim() || sending} onClick={() => void submitLink()}>
-                                <Upload size={16} /> Send
-                            </button>
-                        </div>
+                            <div className="flex items-center gap-2 text-xs">
+                                <span className="muted">Type:</span>
+                                {(["AUTO", "GIF", "IMAGE", "VIDEO"] as DirectKind[]).map((option) => (
+                                    <button key={option} type="button" onClick={() => setDirectKind(option)} className={`rounded-full px-2.5 py-1 ${directKind === option ? "bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300" : "bg-slate-100 dark:bg-slate-800 muted"}`}>
+                                        {option === "AUTO" ? "Auto" : option === "IMAGE" ? "Image" : option}
+                                    </button>
+                                ))}
+                            </div>
+                            <DirectPreview url={link.trim()} kind={directKind === "AUTO" ? directKind(link.trim()) : directKind} />
+                        </>
                     )}
                 </header>
 
@@ -277,13 +335,17 @@ export function KlipyPicker({
                     {tab === "LINKS" ? (
                         <>
                             <div className="mb-3">
-                                <div className="font-semibold text-sm">Your saved links</div>
-                                <div className="muted text-xs mt-0.5">Most sent first — paste once, then reuse it.</div>
+                                <div className="font-semibold text-sm">Your saved direct links</div>
+                                <div className="muted text-xs mt-0.5">Most sent first. These entries keep the original URL exactly as you pasted it.</div>
                             </div>
+                            <button type="button" onClick={starterGif} disabled={sending} className="mb-4 w-full rounded-lg border border-dashed border-slate-300 dark:border-slate-700 px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-60">
+                                <div className="font-semibold text-sm">Use the starter GIF</div>
+                                <div className="muted text-xs mt-0.5 break-all">{STARTER_GIF}</div>
+                            </button>
                             {savedLoading ? (
                                 <div className="py-12 text-center muted">Loading your links…</div>
                             ) : myLinks.length === 0 ? (
-                                <div className="py-12 text-center muted">No saved links yet.</div>
+                                <div className="py-12 text-center muted">No saved direct links yet.</div>
                             ) : (
                                 <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                                     {myLinks.map((item) => (
