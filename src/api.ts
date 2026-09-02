@@ -2,7 +2,7 @@ import axios from "axios";
 
 export const API = import.meta.env.VITE_API_BASE_URL || "https://nu-chat.onrender.com";
 
-export const client = axios.create({ baseURL: API, timeout: 15000, headers: { Accept: "application/json" } });
+export const client = axios.create({ baseURL: API, timeout: 30000, headers: { Accept: "application/json" } });
 client.interceptors.request.use((config) => {
     const token = sessionStorage.getItem("pulse_token");
     if (token) config.headers.Authorization = `Bearer ${token}`;
@@ -33,7 +33,6 @@ export async function logout() {
     } finally {
         sessionStorage.removeItem("pulse_token");
         sessionStorage.removeItem("pulse_user");
-        // Clean up older versions that stored the session in localStorage.
         localStorage.removeItem("pulse_token");
         localStorage.removeItem("pulse_user");
     }
@@ -52,6 +51,15 @@ export async function sendFile(meta: any, replyToMessageId?: string) {
 }
 export async function sendMedia(media: { type: "GIF" | "STICKER"; provider: string; providerId?: string; title?: string; url: string; previewUrl?: string; width?: number; height?: number }, replyToMessageId?: string) {
     return (await client.post("/api/messages/file", { ...media, ...(replyToMessageId ? { replyToMessageId } : {}) })).data;
+}
+export async function sendMediaLink(media: { url: string; type?: "GIF" | "STICKER"; provider?: string; providerId?: string; title?: string }, replyToMessageId?: string) {
+    return (await client.post("/api/media/link", { ...media, ...(replyToMessageId ? { replyToMessageId } : {}) })).data;
+}
+export async function savedMedia() {
+    return (await client.get("/api/media/saved")).data;
+}
+export async function sendSavedMedia(id: string, replyToMessageId?: string) {
+    return (await client.post(`/api/media/saved/${encodeURIComponent(id)}/send`, replyToMessageId ? { replyToMessageId } : {})).data;
 }
 export async function fileDownloadUrl(messageId: string) { return (await client.get(`/api/files/${encodeURIComponent(messageId)}/download-url`)).data.url as string; }
 export async function deleteMessage(id: string) { return (await client.delete(`/api/messages/${id}`)).data; }
