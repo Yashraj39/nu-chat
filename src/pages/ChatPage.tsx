@@ -257,9 +257,23 @@ export function ChatPage({
                         <p className="muted text-xs">Everyone can chat here</p>
                     </div>
 
-                    <div className={`status ${connected ? "online" : "offline"}`}>
-                        {connected ? <Wifi size={14} /> : <WifiOff size={14} />}
-                        {connected ? "Connected" : "Reconnecting…"}
+                    <div className="flex items-center gap-2">
+                        <div
+                            className="flex items-center gap-2 rounded-full border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-1.5"
+                            title="Your display name"
+                        >
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                                You
+                            </span>
+                            <span className="max-w-[180px] truncate text-xs font-bold text-slate-700 dark:text-slate-200">
+                                {user.displayName}
+                            </span>
+                        </div>
+
+                        <div className={`status ${connected ? "online" : "offline"}`}>
+                            {connected ? <Wifi size={14} /> : <WifiOff size={14} />}
+                            {connected ? "Connected" : "Reconnecting…"}
+                        </div>
                     </div>
                 </div>
 
