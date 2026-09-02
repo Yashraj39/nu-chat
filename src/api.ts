@@ -4,7 +4,7 @@ export const API = import.meta.env.VITE_API_BASE_URL || "https://nu-chat.onrende
 
 export const client = axios.create({ baseURL: API, timeout: 15000, headers: { Accept: "application/json" } });
 client.interceptors.request.use((config) => {
-    const token = localStorage.getItem("pulse_token");
+    const token = sessionStorage.getItem("pulse_token");
     if (token) config.headers.Authorization = `Bearer ${token}`;
     return config;
 }, (error) => Promise.reject(error));
@@ -16,8 +16,8 @@ client.interceptors.response.use((response) => response, (error) => {
 
 export async function join(name: string, adminCode: string) {
     const response = await client.post("/api/auth/join", { name: name.trim(), adminCode: adminCode.trim() });
-    localStorage.setItem("pulse_token", response.data.token);
-    localStorage.setItem("pulse_user", JSON.stringify(response.data.user));
+    sessionStorage.setItem("pulse_token", response.data.token);
+    sessionStorage.setItem("pulse_user", JSON.stringify(response.data.user));
     return response.data.user;
 }
 
@@ -27,10 +27,13 @@ export async function heartbeat() {
 
 export async function logout() {
     try {
-        if (localStorage.getItem("pulse_token")) {
+        if (sessionStorage.getItem("pulse_token")) {
             await client.post("/api/auth/logout");
         }
     } finally {
+        sessionStorage.removeItem("pulse_token");
+        sessionStorage.removeItem("pulse_user");
+        // Clean up older versions that stored the session in localStorage.
         localStorage.removeItem("pulse_token");
         localStorage.removeItem("pulse_user");
     }
