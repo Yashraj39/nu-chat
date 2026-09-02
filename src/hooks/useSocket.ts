@@ -29,6 +29,9 @@ function isJwtExpired(token: string): boolean {
 }
 
 function expireSession() {
+    sessionStorage.removeItem("pulse_token");
+    sessionStorage.removeItem("pulse_user");
+    // Also clean up keys left behind by older releases.
     localStorage.removeItem("pulse_token");
     localStorage.removeItem("pulse_user");
     window.dispatchEvent(new Event("pulse:session-expired"));
@@ -62,7 +65,10 @@ export function useSocket(
     }, [onGameState]);
 
     useEffect(() => {
-        const token = localStorage.getItem("pulse_token");
+        // Authentication is stored in sessionStorage. Keeping the WebSocket
+        // on the same storage source as the REST client prevents a perpetual
+        // "Reconnecting…" state after the auth-storage migration.
+        const token = sessionStorage.getItem("pulse_token");
 
         if (!token) {
             setConnected(false);
@@ -219,8 +225,8 @@ export function useSocket(
             // Only treat an explicit authentication error as a dead session.
             const text = `${frame.headers["message"] || ""} ${frame.body || ""}`.toLowerCase();
             if (
-                text.includes("invalid") && text.includes("token") ||
-                text.includes("expired") && text.includes("token") ||
+                (text.includes("invalid") && text.includes("token")) ||
+                (text.includes("expired") && text.includes("token")) ||
                 text.includes("missing websocket token") ||
                 text.includes("authentication required") ||
                 text.includes("session is no longer valid")
