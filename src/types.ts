@@ -19,6 +19,7 @@ export type MediaInfo = {
     title?: string;
     url: string;
     previewUrl?: string;
+    mimeType?: string;
     width?: number;
     height?: number;
 };
@@ -40,6 +41,25 @@ export type Message = {
     replyTo?: ReplyReference | null;
     deleted: boolean;
     createdAt: string;
+};
+
+export type SavedMedia = {
+    id: string;
+    senderId: string;
+    senderName: string;
+    kind: "GIF" | "STICKER" | "IMAGE" | "VIDEO";
+    provider?: string;
+    providerId?: string;
+    title?: string;
+    url: string;
+    previewUrl?: string;
+    publicId?: string;
+    mimeType?: string;
+    width?: number;
+    height?: number;
+    sentCount: number;
+    createdAt: string;
+    lastSentAt?: string;
 };
 
 export type User = { id: string; displayName: string; role: Role };
