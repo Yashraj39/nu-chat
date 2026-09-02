@@ -52,15 +52,21 @@ import {
 export function App() {
     const [user, setUser] = useState<any>(() => {
         try {
-            const token = localStorage.getItem("pulse_token");
-            const storedUser = localStorage.getItem("pulse_user");
+            const token = sessionStorage.getItem("pulse_token");
+            const storedUser = sessionStorage.getItem("pulse_user");
 
             if (!token || !storedUser) {
+                localStorage.removeItem("pulse_token");
+                localStorage.removeItem("pulse_user");
                 return null;
             }
 
             return JSON.parse(storedUser);
         } catch {
+            sessionStorage.removeItem("pulse_token");
+            sessionStorage.removeItem("pulse_user");
+            localStorage.removeItem("pulse_token");
+            localStorage.removeItem("pulse_user");
             return null;
         }
     });
