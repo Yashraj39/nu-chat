@@ -3,26 +3,436 @@ import { Link2, Search, Send, Trash2, X } from "lucide-react";
 import { client, savedMedia, sendMedia, sendMediaLink, sendSavedMedia } from "../api";
 import type { SavedMedia } from "../types";
 
-type Kind = "GIF" | "STICKER"; type Tab = Kind | "LINKS"; type DirectKind = "AUTO" | "GIF" | "IMAGE" | "VIDEO";
-type Item = { id:string; title?:string; media_formats?:Record<string,{url?:string;preview?:string;dims?:number[]}> };
-type Props = { onClose:()=>void; replyToMessageId?:string; isAdmin?:boolean };
-const KEY=import.meta.env.VITE_KLIPY_API_KEY as string|undefined, BASE="https://api.klipy.com";
-function pick(x:Item,k:Kind){const f=x.media_formats||{};for(const n of(k==="STICKER"?["webp","tinywebp","gif","tinygif"]:["gif","mediumgif","tinygif","webp"]))if(f[n]?.url)return{url:f[n]!.url!,preview:f[n]!.preview||f[n]!.url!,dims:f[n]!.dims||[]};return null}
-function detect(u:string):DirectKind{const e=u.split("?")[0].split("#")[0].toLowerCase().split(".").pop()||"";if(e==="gif")return"GIF";if(["jpg","jpeg","png","webp","bmp","avif","svg"].includes(e))return"IMAGE";if(["mp4","webm","mov","m4v","ogv"].includes(e))return"VIDEO";return"AUTO"}
-function typeOf(x:SavedMedia):"GIF"|"IMAGE"|"VIDEO"{if(x.kind==="VIDEO"||x.mimeType?.startsWith("video/"))return"VIDEO";if(x.kind==="IMAGE"||x.mimeType?.startsWith("image/"))return"IMAGE";return"GIF"}
-function canLoad(url:string,type:"GIF"|"STICKER"|"IMAGE"|"VIDEO"):Promise<boolean>{return new Promise(resolve=>{let done=false;const timer=window.setTimeout(()=>finish(false),7000);const finish=(ok:boolean)=>{if(done)return;done=true;clearTimeout(timer);resolve(ok)};try{const u=new URL(url);if(!["http:","https:"].includes(u.protocol))return finish(false);if(type==="VIDEO"){const v=document.createElement("video");v.preload="metadata";v.onloadedmetadata=()=>finish(true);v.onerror=()=>finish(false);v.src=u.href;v.load()}else{const i=new Image();i.onload=()=>finish(true);i.onerror=()=>finish(false);i.src=u.href}}catch{finish(false)}})}
-function readAdmin(){try{return JSON.parse(sessionStorage.getItem("pulse_user")||"null")?.role==="ADMIN"}catch{return false}}
-function Tile({x,isAdmin,busy,send,remove}:{x:SavedMedia;isAdmin:boolean;busy:boolean;send:()=>void;remove:()=>void}){return <div className="relative overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800"><button type="button" disabled={busy} onClick={send} className="block w-full hover:ring-2 hover:ring-indigo-400 disabled:opacity-60"><img src={x.url} alt={x.title||x.kind} loading="lazy" className="w-full h-28 object-contain"/><span className="absolute bottom-1 left-1 rounded-full bg-black/65 px-1.5 py-0.5 text-[10px] text-white">{x.sentCount}×</span></button>{isAdmin&&x.provider==="LINK"&&<button type="button" disabled={busy} onClick={e=>{e.stopPropagation();remove()}} title="Delete direct-link media" aria-label="Delete direct-link media" data-admin-delete="direct-link" className="absolute right-1 top-1 z-10 grid h-7 w-7 place-items-center rounded-full bg-red-600/90 text-white hover:bg-red-700 disabled:opacity-60"><Trash2 size={14}/></button>}</div>}
-export function KlipyPicker({onClose,replyToMessageId,isAdmin:adminProp}:Props){
- const [tab,setTab]=useState<Tab>("GIF"),[query,setQuery]=useState(""),[items,setItems]=useState<Item[]>([]),[saved,setSaved]=useState<SavedMedia[]>([]),[loading,setLoading]=useState(true),[savedLoading,setSavedLoading]=useState(true),[error,setError]=useState(""),[busy,setBusy]=useState(false),[link,setLink]=useState(""),[directType,setDirectType]=useState<DirectKind>("AUTO");
- const isAdm=adminProp??readAdmin(),kind:Kind=tab==="STICKER"?"STICKER":"GIF"; const shared=useMemo(()=>saved.filter(x=>x.kind===kind),[saved,kind]),links=useMemo(()=>saved.filter(x=>x.provider==="LINK"),[saved]);
- useEffect(()=>{let c=false;(async()=>{setSavedLoading(true);try{const d:SavedMedia[]=await savedMedia();const ok=await Promise.all(d.map(async (x:SavedMedia)=>await canLoad(x.url,typeOf(x))?x:null));if(!c)setSaved(ok.filter((x):x is SavedMedia=>x!==null)}catch(e:any){if(!c)setError(e.response?.data?.message||"Unable to load shared media.")}finally{if(!c)setSavedLoading(false)}})();return()=>{c=true}},[]);
- useEffect(()=>{if(tab==="LINKS")return;let c=false;(async()=>{if(!KEY){setError("KLIPY is not configured. Add VITE_KLIPY_API_KEY.");setLoading(false);return}setLoading(true);try{const p=new URLSearchParams({key:KEY,limit:"24",contentfilter:"high",media_filter:kind==="STICKER"?"webp,tinywebp,gif,tinygif":"gif,mediumgif,tinygif"});if(query.trim())p.set("q",query.trim());if(kind==="STICKER")p.set("searchfilter","sticker");const r=await fetch(`${BASE}${query.trim()?"/v2/search":"/v2/featured"}?${p}`);if(!r.ok)throw new Error(`KLIPY returned ${r.status}`);const d=await r.json();if(!c)setItems(d.results||[])}catch(e:any){if(!c)setError(e.message||"Unable to load GIFs.")}finally{if(!c)setLoading(false)}})();return()=>{c=true}},[kind,query,tab]);
- async function sendK(x:Item){const m=pick(x,kind);if(!m||busy)return;try{setBusy(true);setError("");if(!(await canLoad(m.url,kind)))throw new Error("This GIF is blocked or unavailable on this network, so it was not added.");await sendMedia({type:kind,provider:"KLIPY",providerId:x.id,title:x.title,url:m.url,previewUrl:m.preview,width:m.dims[0],height:m.dims[1]},replyToMessageId);onClose()}catch(e:any){setError(e.message||e.response?.data?.message||"Unable to send media.");setBusy(false)}}
- async function sendS(x:SavedMedia){if(busy)return;try{setBusy(true);setError("");if(!(await canLoad(x.url,typeOf(x))))throw new Error("This media is blocked or unavailable on this network.");await sendSavedMedia(x.id,replyToMessageId);onClose()}catch(e:any){setError(e.message||e.response?.data?.message||"Unable to send shared media.");setBusy(false)}}
- async function remove(x:SavedMedia){if(!isAdm||x.provider!=="LINK"||busy||!window.confirm("Remove this direct-link media from the shared library?"))return;try{setBusy(true);setError("");await client.delete(`/api/media/saved/${encodeURIComponent(x.id)}`);setSaved(s=>s.filter(y=>y.id!==x.id))}catch(e:any){setError(e.response?.data?.message||"Unable to delete direct-link media.")}finally{setBusy(false)}}
- async function submit(){const v=link.trim(),k=directType==="AUTO"?detect(v):directType;if(!v||busy)return;if(k==="AUTO"){setError("Use a direct GIF, image, or video URL with a supported extension.");return}try{setBusy(true);setError("");new URL(v);if(!(await canLoad(v,k)))throw new Error("This media cannot be loaded on this network, so it was not added.");await sendMediaLink({url:v,type:k==="GIF"?"GIF":undefined,provider:"LINK"},replyToMessageId);onClose()}catch(e:any){setError(e.message||e.response?.data?.message||"Unable to send media link.");setBusy(false)}}
- function switchTab(t:Tab){setTab(t);setQuery("");setError("")}
- const tile=(x:SavedMedia)=><Tile x={x} isAdmin={isAdm} busy={busy} send={()=>void sendS(x)} remove={()=>void remove(x)}/>;
- return <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-3" onMouseDown={onClose}><section className="w-full max-w-2xl max-h-[80vh] overflow-hidden rounded-2xl bg-white dark:bg-slate-900 shadow-2xl" onMouseDown={e=>e.stopPropagation()}><header className="border-b border-slate-200 dark:border-slate-700 p-3 space-y-3"><div className="flex items-center gap-2"><div className="flex rounded-lg bg-slate-100 dark:bg-slate-800 p-1"><button type="button" className={`px-3 py-1.5 rounded-md text-sm ${tab==="GIF"?"bg-white dark:bg-slate-700 shadow":"muted"}`} onClick={()=>switchTab("GIF")}>GIFs</button><button type="button" className={`px-3 py-1.5 rounded-md text-sm ${tab==="STICKER"?"bg-white dark:bg-slate-700 shadow":"muted"}`} onClick={()=>switchTab("STICKER")}>Stickers</button><button type="button" className={`px-3 py-1.5 rounded-md text-sm ${tab==="LINKS"?"bg-white dark:bg-slate-700 shadow":"muted"}`} onClick={()=>switchTab("LINKS")}>Direct Links</button></div><button className="iconbtn ml-auto" onClick={onClose}><X size={20}/></button></div>{tab!=="LINKS"?<div className="relative"><Search className="absolute left-3 top-2.5 muted" size={17}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder={`Search ${kind.toLowerCase()}…`} className="w-full rounded-lg bg-slate-100 dark:bg-slate-800 py-2 pl-9 pr-3 outline-none" autoFocus/></div>:<><div className="flex gap-2"><div className="relative flex-1"><Link2 className="absolute left-3 top-2.5 muted" size={17}/><input value={link} onChange={e=>{setLink(e.target.value);setDirectType(detect(e.target.value))}} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();void submit()}}} placeholder="Paste a direct image, GIF, or video URL…" className="w-full rounded-lg bg-slate-100 dark:bg-slate-800 py-2 pl-9 pr-3 outline-none" autoFocus/></div><button type="button" className="btn-primary" disabled={!link.trim()||busy} onClick={()=>void submit()}><Send size={16}/> Send</button></div><div className="flex items-center gap-2 text-xs"><span className="muted">Type:</span>{(["AUTO","GIF","IMAGE","VIDEO"] as DirectKind[]).map(x=><button key={x} type="button" onClick={()=>setDirectType(x)} className={`rounded-full px-2.5 py-1 ${directType===x?"bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300":"bg-slate-100 dark:bg-slate-800 muted"}`}>{x==="AUTO"?"Auto":x}</button>)}</div></>}</header><div className="p-3 overflow-y-auto max-h-[65vh]">{error&&<div className="error mb-3">{error}</div>}{tab==="LINKS"?<>{savedLoading?<div className="py-12 text-center muted">Checking shared media…</div>:links.length===0?<div className="py-12 text-center muted">No usable shared links.</div>:<div className="grid grid-cols-3 sm:grid-cols-4 gap-2">{links.map(tile)}</div>}</>:<><div className="mb-2"><div className="font-semibold text-sm">Shared {kind==="GIF"?"GIFs":"stickers"}</div><div className="muted text-xs">Available to everyone. Admins can remove broken items.</div></div>{!savedLoading&&shared.length>0&&<div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-5">{shared.map(tile)}</div>}<div className="font-semibold text-sm mb-2">{query.trim()?"Search results":"Discover"}</div>{loading?<div className="py-12 text-center muted">Loading…</div>:<div className="grid grid-cols-3 sm:grid-cols-4 gap-2">{items.map(x=>{const m=pick(x,kind);return m?<button key={x.id} type="button" disabled={busy} onClick={()=>void sendK(x)} className="overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800 hover:ring-2 hover:ring-indigo-400 transition disabled:opacity-60"><img src={m.preview} alt={x.title||kind} loading="lazy" className="w-full h-28 object-contain"/></button>:null})}</div>}</>}</div></section></div>
+type Kind = "GIF" | "STICKER";
+type Tab = Kind | "LINKS";
+type DirectKind = "AUTO" | "GIF" | "IMAGE" | "VIDEO";
+type Item = { id: string; title?: string; media_formats?: Record<string, { url?: string; preview?: string; dims?: number[] }> };
+type Props = { onClose: () => void; replyToMessageId?: string; isAdmin?: boolean };
+
+const KEY = import.meta.env.VITE_KLIPY_API_KEY as string | undefined;
+const BASE = "https://api.klipy.com";
+
+function pick(x: Item, k: Kind) {
+  const f = x.media_formats || {};
+  const names = k === "STICKER"
+    ? ["webp", "tinywebp", "gif", "tinygif"]
+    : ["gif", "mediumgif", "tinygif", "webp"];
+
+  for (const n of names) {
+    if (f[n]?.url) {
+      return {
+        url: f[n]!.url!,
+        preview: f[n]!.preview || f[n]!.url!,
+        dims: f[n]!.dims || []
+      };
+    }
+  }
+  return null;
+}
+
+function detect(u: string): DirectKind {
+  const e = u.split("?")[0].split("#")[0].toLowerCase().split(".").pop() || "";
+  if (e === "gif") return "GIF";
+  if (["jpg", "jpeg", "png", "webp", "bmp", "avif", "svg"].includes(e)) return "IMAGE";
+  if (["mp4", "webm", "mov", "m4v", "ogv"].includes(e)) return "VIDEO";
+  return "AUTO";
+}
+
+function typeOf(x: SavedMedia): "GIF" | "IMAGE" | "VIDEO" {
+  if (x.kind === "VIDEO" || x.mimeType?.startsWith("video/")) return "VIDEO";
+  if (x.kind === "IMAGE" || x.mimeType?.startsWith("image/")) return "IMAGE";
+  return "GIF";
+}
+
+function canLoad(url: string, type: "GIF" | "STICKER" | "IMAGE" | "VIDEO"): Promise<boolean> {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (ok: boolean) => {
+      if (done) return;
+      done = true;
+      window.clearTimeout(timer);
+      resolve(ok);
+    };
+    const timer = window.setTimeout(() => finish(false), 7000);
+
+    try {
+      const u = new URL(url);
+      if (!["http:", "https:"].includes(u.protocol)) {
+        finish(false);
+        return;
+      }
+
+      if (type === "VIDEO") {
+        const v = document.createElement("video");
+        v.preload = "metadata";
+        v.onloadedmetadata = () => finish(true);
+        v.onerror = () => finish(false);
+        v.src = u.href;
+        v.load();
+      } else {
+        const i = new Image();
+        i.onload = () => finish(true);
+        i.onerror = () => finish(false);
+        i.src = u.href;
+      }
+    } catch {
+      finish(false);
+    }
+  });
+}
+
+function readAdmin() {
+  try {
+    return JSON.parse(sessionStorage.getItem("pulse_user") || "null")?.role === "ADMIN";
+  } catch {
+    return false;
+  }
+}
+
+function Tile({
+  x,
+  isAdmin,
+  busy,
+  send,
+  remove
+}: {
+  x: SavedMedia;
+  isAdmin: boolean;
+  busy: boolean;
+  send: () => void;
+  remove: () => void;
+}) {
+  return (
+    <div className="relative overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800">
+      <button
+        type="button"
+        disabled={busy}
+        onClick={send}
+        className="block w-full hover:ring-2 hover:ring-indigo-400 disabled:opacity-60"
+      >
+        <img src={x.url} alt={x.title || x.kind} loading="lazy" className="w-full h-28 object-contain" />
+        <span className="absolute bottom-1 left-1 rounded-full bg-black/65 px-1.5 py-0.5 text-[10px] text-white">
+          {x.sentCount}×
+        </span>
+      </button>
+      {isAdmin && x.provider === "LINK" && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={(e) => {
+            e.stopPropagation();
+            remove();
+          }}
+          title="Delete direct-link media"
+          aria-label="Delete direct-link media"
+          data-admin-delete="direct-link"
+          className="absolute right-1 top-1 z-10 grid h-7 w-7 place-items-center rounded-full bg-red-600/90 text-white hover:bg-red-700 disabled:opacity-60"
+        >
+          <Trash2 size={14} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function KlipyPicker({ onClose, replyToMessageId, isAdmin: adminProp }: Props) {
+  const [tab, setTab] = useState<Tab>("GIF");
+  const [query, setQuery] = useState("");
+  const [items, setItems] = useState<Item[]>([]);
+  const [saved, setSaved] = useState<SavedMedia[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [savedLoading, setSavedLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [link, setLink] = useState("");
+  const [directType, setDirectType] = useState<DirectKind>("AUTO");
+
+  const isAdm = adminProp ?? readAdmin();
+  const kind: Kind = tab === "STICKER" ? "STICKER" : "GIF";
+  const shared = useMemo(() => saved.filter((x) => x.kind === kind), [saved, kind]);
+  const links = useMemo(() => saved.filter((x) => x.provider === "LINK"), [saved]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      setSavedLoading(true);
+      try {
+        const data: SavedMedia[] = await savedMedia();
+        const checked = await Promise.all(
+          data.map(async (x: SavedMedia) => {
+            const ok = await canLoad(x.url, typeOf(x));
+            return ok ? x : null;
+          })
+        );
+
+        if (!cancelled) {
+          setSaved(checked.filter((x): x is SavedMedia => x !== null));
+        }
+      } catch (e: any) {
+        if (!cancelled) {
+          setError(e.response?.data?.message || "Unable to load shared media.");
+        }
+      } finally {
+        if (!cancelled) setSavedLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (tab === "LINKS") return;
+    let cancelled = false;
+
+    (async () => {
+      if (!KEY) {
+        setError("KLIPY is not configured. Add VITE_KLIPY_API_KEY.");
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const params = new URLSearchParams({
+          key: KEY,
+          limit: "24",
+          contentfilter: "high",
+          media_filter: kind === "STICKER" ? "webp,tinywebp,gif,tinygif" : "gif,mediumgif,tinygif"
+        });
+
+        if (query.trim()) params.set("q", query.trim());
+        if (kind === "STICKER") params.set("searchfilter", "sticker");
+
+        const response = await fetch(
+          `${BASE}${query.trim() ? "/v2/search" : "/v2/featured"}?${params}`
+        );
+        if (!response.ok) throw new Error(`KLIPY returned ${response.status}`);
+
+        const data = await response.json();
+        if (!cancelled) setItems(data.results || []);
+      } catch (e: any) {
+        if (!cancelled) setError(e.message || "Unable to load GIFs.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [kind, query, tab]);
+
+  async function sendK(x: Item) {
+    const media = pick(x, kind);
+    if (!media || busy) return;
+
+    try {
+      setBusy(true);
+      setError("");
+      if (!(await canLoad(media.url, kind))) {
+        throw new Error("This GIF is blocked or unavailable on this network, so it was not added.");
+      }
+      await sendMedia(
+        {
+          type: kind,
+          provider: "KLIPY",
+          providerId: x.id,
+          title: x.title,
+          url: media.url,
+          previewUrl: media.preview,
+          width: media.dims[0],
+          height: media.dims[1]
+        },
+        replyToMessageId
+      );
+      onClose();
+    } catch (e: any) {
+      setError(e.message || e.response?.data?.message || "Unable to send media.");
+      setBusy(false);
+    }
+  }
+
+  async function sendS(x: SavedMedia) {
+    if (busy) return;
+
+    try {
+      setBusy(true);
+      setError("");
+      if (!(await canLoad(x.url, typeOf(x)))) {
+        throw new Error("This media is blocked or unavailable on this network.");
+      }
+      await sendSavedMedia(x.id, replyToMessageId);
+      onClose();
+    } catch (e: any) {
+      setError(e.message || e.response?.data?.message || "Unable to send shared media.");
+      setBusy(false);
+    }
+  }
+
+  async function remove(x: SavedMedia) {
+    if (!isAdm || x.provider !== "LINK" || busy) return;
+    if (!window.confirm("Remove this direct-link media from the shared library?")) return;
+
+    try {
+      setBusy(true);
+      setError("");
+      await client.delete(`/api/media/saved/${encodeURIComponent(x.id)}`);
+      setSaved((current) => current.filter((y) => y.id !== x.id));
+    } catch (e: any) {
+      setError(e.response?.data?.message || "Unable to delete direct-link media.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submit() {
+    const value = link.trim();
+    const selectedType = directType === "AUTO" ? detect(value) : directType;
+    if (!value || busy) return;
+
+    if (selectedType === "AUTO") {
+      setError("Use a direct GIF, image, or video URL with a supported extension.");
+      return;
+    }
+
+    try {
+      setBusy(true);
+      setError("");
+      new URL(value);
+      if (!(await canLoad(value, selectedType))) {
+        throw new Error("This media cannot be loaded on this network, so it was not added.");
+      }
+      await sendMediaLink(
+        { url: value, type: selectedType === "GIF" ? "GIF" : undefined, provider: "LINK" },
+        replyToMessageId
+      );
+      onClose();
+    } catch (e: any) {
+      setError(e.message || e.response?.data?.message || "Unable to send media link.");
+      setBusy(false);
+    }
+  }
+
+  function switchTab(next: Tab) {
+    setTab(next);
+    setQuery("");
+    setError("");
+  }
+
+  const tile = (x: SavedMedia) => (
+    <Tile
+      key={x.id}
+      x={x}
+      isAdmin={isAdm}
+      busy={busy}
+      send={() => void sendS(x)}
+      remove={() => void remove(x)}
+    />
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-3" onMouseDown={onClose}>
+      <section
+        className="w-full max-w-2xl max-h-[80vh] overflow-hidden rounded-2xl bg-white dark:bg-slate-900 shadow-2xl"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <header className="border-b border-slate-200 dark:border-slate-700 p-3 space-y-3">
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-lg bg-slate-100 dark:bg-slate-800 p-1">
+              <button type="button" className={`px-3 py-1.5 rounded-md text-sm ${tab === "GIF" ? "bg-white dark:bg-slate-700 shadow" : "muted"}`} onClick={() => switchTab("GIF")}>GIFs</button>
+              <button type="button" className={`px-3 py-1.5 rounded-md text-sm ${tab === "STICKER" ? "bg-white dark:bg-slate-700 shadow" : "muted"}`} onClick={() => switchTab("STICKER")}>Stickers</button>
+              <button type="button" className={`px-3 py-1.5 rounded-md text-sm ${tab === "LINKS" ? "bg-white dark:bg-slate-700 shadow" : "muted"}`} onClick={() => switchTab("LINKS")}>Direct Links</button>
+            </div>
+            <button className="iconbtn ml-auto" onClick={onClose}><X size={20} /></button>
+          </div>
+
+          {tab !== "LINKS" ? (
+            <div className="relative">
+              <Search className="absolute left-3 top-2.5 muted" size={17} />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`Search ${kind.toLowerCase()}…`} className="w-full rounded-lg bg-slate-100 dark:bg-slate-800 py-2 pl-9 pr-3 outline-none" autoFocus />
+            </div>
+          ) : (
+            <>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Link2 className="absolute left-3 top-2.5 muted" size={17} />
+                  <input
+                    value={link}
+                    onChange={(e) => {
+                      setLink(e.target.value);
+                      setDirectType(detect(e.target.value));
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void submit();
+                      }
+                    }}
+                    placeholder="Paste a direct image, GIF, or video URL…"
+                    className="w-full rounded-lg bg-slate-100 dark:bg-slate-800 py-2 pl-9 pr-3 outline-none"
+                    autoFocus
+                  />
+                </div>
+                <button type="button" className="btn-primary" disabled={!link.trim() || busy} onClick={() => void submit()}><Send size={16} /> Send</button>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="muted">Type:</span>
+                {(["AUTO", "GIF", "IMAGE", "VIDEO"] as DirectKind[]).map((x) => (
+                  <button key={x} type="button" onClick={() => setDirectType(x)} className={`rounded-full px-2.5 py-1 ${directType === x ? "bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300" : "bg-slate-100 dark:bg-slate-800 muted"}`}>
+                    {x === "AUTO" ? "Auto" : x}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </header>
+
+        <div className="p-3 overflow-y-auto max-h-[65vh]">
+          {error && <div className="error mb-3">{error}</div>}
+
+          {tab === "LINKS" ? (
+            <>
+              {savedLoading ? (
+                <div className="py-12 text-center muted">Checking shared media…</div>
+              ) : links.length === 0 ? (
+                <div className="py-12 text-center muted">No usable shared links.</div>
+              ) : (
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">{links.map(tile)}</div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="mb-2">
+                <div className="font-semibold text-sm">Shared {kind === "GIF" ? "GIFs" : "stickers"}</div>
+                <div className="muted text-xs">Available to everyone. Admins can remove broken items.</div>
+              </div>
+
+              {!savedLoading && shared.length > 0 && (
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-5">{shared.map(tile)}</div>
+              )}
+
+              <div className="font-semibold text-sm mb-2">{query.trim() ? "Search results" : "Discover"}</div>
+              {loading ? (
+                <div className="py-12 text-center muted">Loading…</div>
+              ) : (
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                  {items.map((x) => {
+                    const media = pick(x, kind);
+                    return media ? (
+                      <button key={x.id} type="button" disabled={busy} onClick={() => void sendK(x)} className="overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800 hover:ring-2 hover:ring-indigo-400 transition disabled:opacity-60">
+                        <img src={media.preview} alt={x.title || kind} loading="lazy" className="w-full h-28 object-contain" />
+                      </button>
+                    ) : null;
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </section>
+    </div>
+  );
 }
