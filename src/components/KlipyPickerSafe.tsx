@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link2, Search, Send, Trash2, X } from "lucide-react";
-import { client, savedMedia, sendMedia, sendMediaLink, sendSavedMedia } from "../api";
+import { client, klipyContentUrl, savedMedia, sendMedia, sendMediaLink, sendSavedMedia } from "../api";
 import type { SavedMedia } from "../types";
 
 type Kind = "GIF" | "STICKER";
@@ -10,7 +10,6 @@ type Item = { id: string; title?: string; media_formats?: Record<string, { url?:
 type Props = { onClose: () => void; replyToMessageId?: string; isAdmin?: boolean };
 
 const KEY = import.meta.env.VITE_KLIPY_API_KEY as string | undefined;
-const BASE = "https://api.klipy.com";
 
 function pick(x: Item, k: Kind) {
   const f = x.media_formats || {};
@@ -42,6 +41,11 @@ function typeOf(x: SavedMedia): "GIF" | "IMAGE" | "VIDEO" {
   if (x.kind === "VIDEO" || x.mimeType?.startsWith("video/")) return "VIDEO";
   if (x.kind === "IMAGE" || x.mimeType?.startsWith("image/")) return "IMAGE";
   return "GIF";
+}
+
+function proxySavedUrl(x: SavedMedia): string {
+  if (x.provider === "KLIPY" && x.id) return `${import.meta.env.VITE_API_BASE_URL || "https://nu-chat.onrender.com"}/api/media/saved/content/${encodeURIComponent(x.id)}`;
+  return x.url;
 }
 
 function canLoad(url: string, type: "GIF" | "STICKER" | "IMAGE" | "VIDEO"): Promise<boolean> {
@@ -102,6 +106,7 @@ function Tile({
   send: () => void;
   remove: () => void;
 }) {
+  const displayUrl = proxySavedUrl(x);
   return (
     <div className="relative overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800">
       <button
@@ -110,7 +115,7 @@ function Tile({
         onClick={send}
         className="block w-full hover:ring-2 hover:ring-indigo-400 disabled:opacity-60"
       >
-        <img src={x.url} alt={x.title || x.kind} loading="lazy" className="w-full h-28 object-contain" />
+        <img src={displayUrl} alt={x.title || x.kind} loading="lazy" className="w-full h-28 object-contain" />
         <span className="absolute bottom-1 left-1 rounded-full bg-black/65 px-1.5 py-0.5 text-[10px] text-white">
           {x.sentCount}×
         </span>
@@ -161,7 +166,8 @@ export function KlipyPicker({ onClose, replyToMessageId, isAdmin: adminProp }: P
         const data: SavedMedia[] = await savedMedia();
         const checked = await Promise.all(
           data.map(async (x: SavedMedia) => {
-            const ok = await canLoad(x.url, typeOf(x));
+            const displayUrl = proxySavedUrl(x);
+            const ok = await canLoad(displayUrl, typeOf(x));
             return ok ? x : null;
           })
         );
@@ -206,15 +212,11 @@ export function KlipyPicker({ onClose, replyToMessageId, isAdmin: adminProp }: P
         if (query.trim()) params.set("q", query.trim());
         if (kind === "STICKER") params.set("searchfilter", "sticker");
 
-        const response = await fetch(
-          `${BASE}${query.trim() ? "/v2/search" : "/v2/featured"}?${params}`
-        );
-        if (!response.ok) throw new Error(`KLIPY returned ${response.status}`);
-
-        const data = await response.json();
+        const response = await client.get(query.trim() ? "/api/klipy/search" : "/api/klipy/featured", { params });
+        const data = response.data;
         if (!cancelled) setItems(data.results || []);
       } catch (e: any) {
-        if (!cancelled) setError(e.message || "Unable to load GIFs.");
+        if (!cancelled) setError(e.response?.data?.message || e.message || "Unable to load GIFs.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -232,8 +234,9 @@ export function KlipyPicker({ onClose, replyToMessageId, isAdmin: adminProp }: P
     try {
       setBusy(true);
       setError("");
-      if (!(await canLoad(media.url, kind))) {
-        throw new Error("This GIF is blocked or unavailable on this network, so it was not added.");
+      const displayUrl = klipyContentUrl(media.url);
+      if (!(await canLoad(displayUrl, kind))) {
+        throw new Error("This GIF is unavailable through the media proxy, so it was not added.");
       }
       await sendMedia(
         {
@@ -261,8 +264,9 @@ export function KlipyPicker({ onClose, replyToMessageId, isAdmin: adminProp }: P
     try {
       setBusy(true);
       setError("");
-      if (!(await canLoad(x.url, typeOf(x)))) {
-        throw new Error("This media is blocked or unavailable on this network.");
+      const displayUrl = proxySavedUrl(x);
+      if (!(await canLoad(displayUrl, typeOf(x)))) {
+        throw new Error("This media is unavailable through the media proxy.");
       }
       await sendSavedMedia(x.id, replyToMessageId);
       onClose();
@@ -423,7 +427,7 @@ export function KlipyPicker({ onClose, replyToMessageId, isAdmin: adminProp }: P
                     const media = pick(x, kind);
                     return media ? (
                       <button key={x.id} type="button" disabled={busy} onClick={() => void sendK(x)} className="overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800 hover:ring-2 hover:ring-indigo-400 transition disabled:opacity-60">
-                        <img src={media.preview} alt={x.title || kind} loading="lazy" className="w-full h-28 object-contain" />
+                        <img src={klipyContentUrl(media.preview)} alt={x.title || kind} loading="lazy" className="w-full h-28 object-contain" />
                       </button>
                     ) : null;
                   })}
