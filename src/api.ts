@@ -65,6 +65,9 @@ export async function fileDownloadUrl(messageId: string) { return (await client.
 export function fileContentUrl(publicId: string) {
     return `${API}/api/files/content?publicId=${encodeURIComponent(publicId)}`;
 }
+export function klipyContentUrl(url: string) {
+    return `${API}/api/klipy/content?url=${encodeURIComponent(url)}`;
+}
 export async function deleteMessage(id: string) { return (await client.delete(`/api/messages/${id}`)).data; }
 export async function gameRooms() { return (await client.get("/api/games/rooms")).data; }
 export async function createRoom(gameType: string) { return (await client.post("/api/games/rooms", { gameType })).data; }
