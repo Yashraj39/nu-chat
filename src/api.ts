@@ -62,6 +62,9 @@ export async function sendSavedMedia(id: string, replyToMessageId?: string) {
     return (await client.post(`/api/media/saved/${encodeURIComponent(id)}/send`, replyToMessageId ? { replyToMessageId } : {})).data;
 }
 export async function fileDownloadUrl(messageId: string) { return (await client.get(`/api/files/${encodeURIComponent(messageId)}/download-url`)).data.url as string; }
+export function fileContentUrl(publicId: string) {
+    return `${API}/api/files/content?publicId=${encodeURIComponent(publicId)}`;
+}
 export async function deleteMessage(id: string) { return (await client.delete(`/api/messages/${id}`)).data; }
 export async function gameRooms() { return (await client.get("/api/games/rooms")).data; }
 export async function createRoom(gameType: string) { return (await client.post("/api/games/rooms", { gameType })).data; }
