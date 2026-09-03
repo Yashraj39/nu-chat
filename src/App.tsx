@@ -49,6 +49,8 @@ import {
     AdminPage,
 } from "./pages/AdminPage";
 
+import { TicTacToeRestart } from "./components/TicTacToeRestart";
+
 export function App() {
     const [user, setUser] = useState<any>(() => {
         try {
@@ -333,6 +335,8 @@ function Shell({
         }
     }, [location.pathname]);
 
+    const gameRoomId = location.pathname.match(/^\/games\/([^/]+)$/)?.[1];
+
     return (
         <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
             <header className="topbar">
@@ -392,6 +396,8 @@ function Shell({
                 <Route path="/admin" element={<AdminPage user={user} />} />
                 <Route path="*" element={<Navigate to="/chat" replace />} />
             </Routes>
+
+            {gameRoomId && <TicTacToeRestart roomId={gameRoomId} />}
         </div>
     );
 }
