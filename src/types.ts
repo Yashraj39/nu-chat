@@ -32,7 +32,8 @@ export type Message = {
     content?: string;
     file?: {
         url: string;
-        publicId: string;
+        publicId?: string;
+        driveFileId?: string;
         originalName: string;
         mimeType: string;
         size: number;
