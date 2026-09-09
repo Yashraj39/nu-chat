@@ -1,6 +1,7 @@
 import axios from "axios";
 
 export const API = import.meta.env.VITE_API_BASE_URL || "https://nu-chat.onrender.com";
+export const FILE_STORAGE = (import.meta.env.VITE_FILE_STORAGE || "drive").trim().toLowerCase();
 
 export const client = axios.create({
     baseURL: API,
@@ -60,16 +61,76 @@ export async function sendText(content: string, replyToMessageId?: string) {
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
-export async function upload(file: File, onUploadProgress: (percent: number) => void) {
-    if (file.size > MAX_UPLOAD_BYTES) {
-        throw new Error("File is too large. Maximum upload size is 25 MB.");
-    }
+function uploadToDriveSession(uploadUrl: string, file: File, onUploadProgress: (percent: number) => void): Promise<any> {
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("PUT", uploadUrl, true);
+        xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+        xhr.responseType = "text";
+        xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable) {
+                onUploadProgress(Math.min(100, Math.round((event.loaded * 100) / event.total)));
+            }
+        };
+        xhr.onerror = () => reject(new Error("Google Drive upload could not reach the upload server."));
+        xhr.ontimeout = () => reject(new Error("Google Drive upload timed out."));
+        xhr.onabort = () => reject(new Error("Upload was cancelled."));
+        xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                try {
+                    resolve(xhr.responseText ? JSON.parse(xhr.responseText) : {});
+                } catch {
+                    reject(new Error("Google Drive returned an invalid upload response."));
+                }
+            } else {
+                reject(new Error(`Google Drive upload failed (HTTP ${xhr.status}).`));
+            }
+        };
+        xhr.send(file);
+    });
+}
 
+async function uploadToDrive(file: File, onUploadProgress: (percent: number) => void) {
+    const prepare = await client.post("/api/files/drive/prepare", {
+        fileName: file.name,
+        mimeType: file.type || "application/octet-stream",
+        size: file.size
+    });
+
+    const uploadUrl = String(prepare.data?.uploadUrl || "").trim();
+    if (!uploadUrl) throw new Error("Google Drive did not provide an upload session.");
+
+    const uploaded = await uploadToDriveSession(uploadUrl, file, onUploadProgress);
+    const driveFileId = String(uploaded?.id || "").trim();
+    if (!driveFileId) throw new Error("Google Drive did not return the uploaded file ID.");
+
+    onUploadProgress(100);
+    return (await client.post("/api/files/drive/complete", {
+        fileId: driveFileId,
+        originalName: file.name,
+        mimeType: file.type || "application/octet-stream",
+        size: file.size
+    })).data;
+}
+
+async function uploadToCloudinary(file: File, onUploadProgress: (percent: number) => void) {
     const formData = new FormData();
     formData.append("file", file);
     return (await client.post("/api/files/upload", formData, {
         onUploadProgress: e => onUploadProgress(Math.round((e.loaded * 100) / (e.total || 1)))
     })).data;
+}
+
+export async function upload(file: File, onUploadProgress: (percent: number) => void) {
+    if (file.size > MAX_UPLOAD_BYTES) {
+        throw new Error("File is too large. Maximum upload size is 25 MB.");
+    }
+
+    if (FILE_STORAGE === "cloudinary") {
+        return uploadToCloudinary(file, onUploadProgress);
+    }
+
+    return uploadToDrive(file, onUploadProgress);
 }
 
 export async function sendFile(meta: any, replyToMessageId?: string) {
