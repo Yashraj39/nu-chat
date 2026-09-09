@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Search, X } from "lucide-react";
-import { client, savedMedia, savedMediaContentUrl, sendMedia, sendSavedMedia } from "../api";
-import type { SavedMedia } from "../types";
+import { client, sendMedia } from "../api";
 
 type Kind = "GIF" | "STICKER";
 type Item = {
@@ -32,86 +31,13 @@ function pick(x: Item, kind: Kind) {
   return null;
 }
 
-function isCloudinaryUrl(url?: string) {
-  if (!url) return false;
-  try {
-    return new URL(url).host.toLowerCase().endsWith("res.cloudinary.com");
-  } catch {
-    return false;
-  }
-}
-
-function savedDisplayUrl(x: SavedMedia) {
-  if (x.provider === "KLIPY") {
-    if (x.previewUrl && !isCloudinaryUrl(x.previewUrl)) return x.previewUrl;
-    if (x.url && !isCloudinaryUrl(x.url)) return x.url;
-  }
-  return savedMediaContentUrl(x.id);
-}
-
-function Tile({ x, busy, send }: { x: SavedMedia; busy: boolean; send: () => void }) {
-  const directUrl = savedDisplayUrl(x);
-  const fallbackUrl = savedMediaContentUrl(x.id);
-  const [fallback, setFallback] = useState(false);
-  const src = !fallback ? directUrl : fallbackUrl;
-
-  return (
-    <button
-      type="button"
-      disabled={busy}
-      onClick={send}
-      className="relative block w-full overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800 hover:ring-2 hover:ring-indigo-400 disabled:opacity-60"
-    >
-      <img
-        src={src}
-        alt={x.title || x.kind}
-        loading="lazy"
-        className="w-full h-28 object-contain"
-        onError={() => {
-          if (src !== fallbackUrl) setFallback(true);
-        }}
-      />
-      <span className="absolute bottom-1 left-1 rounded-full bg-black/65 px-1.5 py-0.5 text-[10px] text-white">
-        {x.sentCount}×
-      </span>
-    </button>
-  );
-}
-
 export function KlipyPicker({ onClose, replyToMessageId }: Props) {
   const [tab, setTab] = useState<Kind>("GIF");
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<Item[]>([]);
-  const [saved, setSaved] = useState<SavedMedia[]>([]);
   const [loading, setLoading] = useState(true);
-  const [savedLoading, setSavedLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-
-  const shared = useMemo(
-    () => saved.filter((x) => x.kind === tab && x.provider !== "LINK"),
-    [saved, tab]
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      setSavedLoading(true);
-      try {
-        const data: SavedMedia[] = await savedMedia();
-        if (!cancelled) setSaved(data.filter((x) => x.provider !== "LINK"));
-      } catch (e: any) {
-        if (!cancelled) setError(e.response?.data?.message || "Unable to load shared media.");
-      } finally {
-        if (!cancelled) setSavedLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     if (!KEY) {
@@ -178,20 +104,6 @@ export function KlipyPicker({ onClose, replyToMessageId }: Props) {
     }
   }
 
-  async function sendS(x: SavedMedia) {
-    if (busy) return;
-
-    try {
-      setBusy(true);
-      setError("");
-      await sendSavedMedia(x.id, replyToMessageId);
-      onClose();
-    } catch (e: any) {
-      setError(e.response?.data?.message || e.message || "Unable to send shared media.");
-      setBusy(false);
-    }
-  }
-
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-3" onMouseDown={onClose}>
       <section
@@ -229,21 +141,6 @@ export function KlipyPicker({ onClose, replyToMessageId }: Props) {
 
         <div className="p-3 overflow-y-auto max-h-[65vh]">
           {error && <div className="error mb-3">{error}</div>}
-
-          <div className="mb-2">
-            <div className="font-semibold text-sm">Shared {tab === "GIF" ? "GIFs" : "stickers"}</div>
-            <div className="muted text-xs">Available to everyone.</div>
-          </div>
-
-          {savedLoading ? (
-            <div className="py-4 text-center muted">Loading shared media…</div>
-          ) : shared.length > 0 ? (
-            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-5">
-              {shared.map((x) => (
-                <Tile key={x.id} x={x} busy={busy} send={() => void sendS(x)} />
-              ))}
-            </div>
-          ) : null}
 
           <div className="font-semibold text-sm mb-2">{query.trim() ? "Search results" : "Discover"}</div>
           {loading ? (
