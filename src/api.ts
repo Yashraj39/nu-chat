@@ -61,6 +61,52 @@ export async function sendText(content: string, replyToMessageId?: string) {
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
+async function createDriveUploadSession(file: File) {
+    // Render supplies only a short-lived access token. The resumable session
+    // itself is created from the browser, so Google associates it with the
+    // same origin that performs the subsequent PUT upload.
+    const bootstrap = await client.get("/api/files/drive/client-token");
+    const accessToken = String(bootstrap.data?.accessToken || "").trim();
+    const folderId = String(bootstrap.data?.folderId || "").trim();
+    if (!accessToken) throw new Error("Google Drive access token was not provided.");
+    if (!folderId) throw new Error("Google Drive folder is not configured.");
+
+    const metadata = {
+        name: file.name,
+        mimeType: file.type || "application/octet-stream",
+        parents: [folderId]
+    };
+
+    const response = await fetch(
+        "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true",
+        {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                "Content-Type": "application/json; charset=UTF-8",
+                "X-Upload-Content-Type": file.type || "application/octet-stream",
+                "X-Upload-Content-Length": String(file.size)
+            },
+            body: JSON.stringify(metadata)
+        }
+    );
+
+    if (!response.ok) {
+        let detail = "";
+        try {
+            const body = await response.text();
+            if (body) detail = `: ${body.slice(0, 240)}`;
+        } catch {
+            // Ignore an unreadable error body.
+        }
+        throw new Error(`Google Drive could not create the upload session (HTTP ${response.status})${detail}`);
+    }
+
+    const uploadUrl = response.headers.get("Location")?.trim() || "";
+    if (!uploadUrl) throw new Error("Google Drive did not return an upload session.");
+    return uploadUrl;
+}
+
 function uploadToDriveSession(uploadUrl: string, file: File, onUploadProgress: (percent: number) => void): Promise<any> {
     return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
@@ -91,15 +137,7 @@ function uploadToDriveSession(uploadUrl: string, file: File, onUploadProgress: (
 }
 
 async function uploadToDrive(file: File, onUploadProgress: (percent: number) => void) {
-    const prepare = await client.post("/api/files/drive/prepare", {
-        fileName: file.name,
-        mimeType: file.type || "application/octet-stream",
-        size: file.size
-    });
-
-    const uploadUrl = String(prepare.data?.uploadUrl || "").trim();
-    if (!uploadUrl) throw new Error("Google Drive did not provide an upload session.");
-
+    const uploadUrl = await createDriveUploadSession(file);
     const uploaded = await uploadToDriveSession(uploadUrl, file, onUploadProgress);
     const driveFileId = String(uploaded?.id || "").trim();
     if (!driveFileId) throw new Error("Google Drive did not return the uploaded file ID.");
