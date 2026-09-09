@@ -1,147 +1,85 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link2, Search, Send, Trash2, X } from "lucide-react";
-import { client, klipyContentUrl, savedMedia, sendMedia, sendMediaLink, sendSavedMedia } from "../api";
+import { Search, X } from "lucide-react";
+import { client, savedMedia, savedMediaContentUrl, sendMedia, sendSavedMedia } from "../api";
 import type { SavedMedia } from "../types";
 
 type Kind = "GIF" | "STICKER";
-type Tab = Kind | "LINKS";
-type DirectKind = "AUTO" | "GIF" | "IMAGE" | "VIDEO";
-type Item = { id: string; title?: string; media_formats?: Record<string, { url?: string; preview?: string; dims?: number[] }> };
-type Props = { onClose: () => void; replyToMessageId?: string; isAdmin?: boolean };
+type Item = {
+  id: string;
+  title?: string;
+  media_formats?: Record<string, { url?: string; preview?: string; dims?: number[] }>;
+};
+type Props = { onClose: () => void; replyToMessageId?: string };
 
 const KEY = import.meta.env.VITE_KLIPY_API_KEY as string | undefined;
 
-function pick(x: Item, k: Kind) {
-  const f = x.media_formats || {};
-  const names = k === "STICKER"
+function pick(x: Item, kind: Kind) {
+  const formats = x.media_formats || {};
+  const names = kind === "STICKER"
     ? ["webp", "tinywebp", "gif", "tinygif"]
     : ["gif", "mediumgif", "tinygif", "webp"];
 
-  for (const n of names) {
-    if (f[n]?.url) {
+  for (const name of names) {
+    const format = formats[name];
+    if (format?.url) {
       return {
-        url: f[n]!.url!,
-        preview: f[n]!.preview || f[n]!.url!,
-        dims: f[n]!.dims || []
+        url: format.url,
+        preview: format.preview || format.url,
+        dims: format.dims || []
       };
     }
   }
   return null;
 }
 
-function detect(u: string): DirectKind {
-  const e = u.split("?")[0].split("#")[0].toLowerCase().split(".").pop() || "";
-  if (e === "gif") return "GIF";
-  if (["jpg", "jpeg", "png", "webp", "bmp", "avif", "svg"].includes(e)) return "IMAGE";
-  if (["mp4", "webm", "mov", "m4v", "ogv"].includes(e)) return "VIDEO";
-  return "AUTO";
-}
-
-function typeOf(x: SavedMedia): "GIF" | "IMAGE" | "VIDEO" {
-  if (x.kind === "VIDEO" || x.mimeType?.startsWith("video/")) return "VIDEO";
-  if (x.kind === "IMAGE" || x.mimeType?.startsWith("image/")) return "IMAGE";
-  return "GIF";
-}
-
-function proxySavedUrl(x: SavedMedia): string {
-  if (x.provider === "KLIPY" && x.id) return `${import.meta.env.VITE_API_BASE_URL || "https://nu-chat.onrender.com"}/api/media/saved/content/${encodeURIComponent(x.id)}`;
-  return x.url;
-}
-
-function canLoad(url: string, type: "GIF" | "STICKER" | "IMAGE" | "VIDEO"): Promise<boolean> {
-  return new Promise((resolve) => {
-    let done = false;
-    const finish = (ok: boolean) => {
-      if (done) return;
-      done = true;
-      window.clearTimeout(timer);
-      resolve(ok);
-    };
-    const timer = window.setTimeout(() => finish(false), 7000);
-
-    try {
-      const u = new URL(url);
-      if (!["http:", "https:"].includes(u.protocol)) {
-        finish(false);
-        return;
-      }
-
-      if (type === "VIDEO") {
-        const v = document.createElement("video");
-        v.preload = "metadata";
-        v.onloadedmetadata = () => finish(true);
-        v.onerror = () => finish(false);
-        v.src = u.href;
-        v.load();
-      } else {
-        const i = new Image();
-        i.onload = () => finish(true);
-        i.onerror = () => finish(false);
-        i.src = u.href;
-      }
-    } catch {
-      finish(false);
-    }
-  });
-}
-
-function readAdmin() {
+function isCloudinaryUrl(url?: string) {
+  if (!url) return false;
   try {
-    return JSON.parse(sessionStorage.getItem("pulse_user") || "null")?.role === "ADMIN";
+    return new URL(url).host.toLowerCase().endsWith("res.cloudinary.com");
   } catch {
     return false;
   }
 }
 
-function Tile({
-  x,
-  isAdmin,
-  busy,
-  send,
-  remove
-}: {
-  x: SavedMedia;
-  isAdmin: boolean;
-  busy: boolean;
-  send: () => void;
-  remove: () => void;
-}) {
-  const displayUrl = proxySavedUrl(x);
+function savedDisplayUrl(x: SavedMedia) {
+  if (x.provider === "KLIPY") {
+    if (x.previewUrl && !isCloudinaryUrl(x.previewUrl)) return x.previewUrl;
+    if (x.url && !isCloudinaryUrl(x.url)) return x.url;
+  }
+  return savedMediaContentUrl(x.id);
+}
+
+function Tile({ x, busy, send }: { x: SavedMedia; busy: boolean; send: () => void }) {
+  const directUrl = savedDisplayUrl(x);
+  const fallbackUrl = savedMediaContentUrl(x.id);
+  const [fallback, setFallback] = useState(false);
+  const src = !fallback ? directUrl : fallbackUrl;
+
   return (
-    <div className="relative overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800">
-      <button
-        type="button"
-        disabled={busy}
-        onClick={send}
-        className="block w-full hover:ring-2 hover:ring-indigo-400 disabled:opacity-60"
-      >
-        <img src={displayUrl} alt={x.title || x.kind} loading="lazy" className="w-full h-28 object-contain" />
-        <span className="absolute bottom-1 left-1 rounded-full bg-black/65 px-1.5 py-0.5 text-[10px] text-white">
-          {x.sentCount}×
-        </span>
-      </button>
-      {isAdmin && x.provider === "LINK" && (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={(e) => {
-            e.stopPropagation();
-            remove();
-          }}
-          title="Delete direct-link media"
-          aria-label="Delete direct-link media"
-          data-admin-delete="direct-link"
-          className="absolute right-1 top-1 z-10 grid h-7 w-7 place-items-center rounded-full bg-red-600/90 text-white hover:bg-red-700 disabled:opacity-60"
-        >
-          <Trash2 size={14} />
-        </button>
-      )}
-    </div>
+    <button
+      type="button"
+      disabled={busy}
+      onClick={send}
+      className="relative block w-full overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800 hover:ring-2 hover:ring-indigo-400 disabled:opacity-60"
+    >
+      <img
+        src={src}
+        alt={x.title || x.kind}
+        loading="lazy"
+        className="w-full h-28 object-contain"
+        onError={() => {
+          if (src !== fallbackUrl) setFallback(true);
+        }}
+      />
+      <span className="absolute bottom-1 left-1 rounded-full bg-black/65 px-1.5 py-0.5 text-[10px] text-white">
+        {x.sentCount}×
+      </span>
+    </button>
   );
 }
 
-export function KlipyPicker({ onClose, replyToMessageId, isAdmin: adminProp }: Props) {
-  const [tab, setTab] = useState<Tab>("GIF");
+export function KlipyPicker({ onClose, replyToMessageId }: Props) {
+  const [tab, setTab] = useState<Kind>("GIF");
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<Item[]>([]);
   const [saved, setSaved] = useState<SavedMedia[]>([]);
@@ -149,13 +87,11 @@ export function KlipyPicker({ onClose, replyToMessageId, isAdmin: adminProp }: P
   const [savedLoading, setSavedLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [link, setLink] = useState("");
-  const [directType, setDirectType] = useState<DirectKind>("AUTO");
 
-  const isAdm = adminProp ?? readAdmin();
-  const kind: Kind = tab === "STICKER" ? "STICKER" : "GIF";
-  const shared = useMemo(() => saved.filter((x) => x.kind === kind), [saved, kind]);
-  const links = useMemo(() => saved.filter((x) => x.provider === "LINK"), [saved]);
+  const shared = useMemo(
+    () => saved.filter((x) => x.kind === tab && x.provider !== "LINK"),
+    [saved, tab]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -164,21 +100,9 @@ export function KlipyPicker({ onClose, replyToMessageId, isAdmin: adminProp }: P
       setSavedLoading(true);
       try {
         const data: SavedMedia[] = await savedMedia();
-        const checked = await Promise.all(
-          data.map(async (x: SavedMedia) => {
-            const displayUrl = proxySavedUrl(x);
-            const ok = await canLoad(displayUrl, typeOf(x));
-            return ok ? x : null;
-          })
-        );
-
-        if (!cancelled) {
-          setSaved(checked.filter((x): x is SavedMedia => x !== null));
-        }
+        if (!cancelled) setSaved(data.filter((x) => x.provider !== "LINK"));
       } catch (e: any) {
-        if (!cancelled) {
-          setError(e.response?.data?.message || "Unable to load shared media.");
-        }
+        if (!cancelled) setError(e.response?.data?.message || "Unable to load shared media.");
       } finally {
         if (!cancelled) setSavedLoading(false);
       }
@@ -190,57 +114,53 @@ export function KlipyPicker({ onClose, replyToMessageId, isAdmin: adminProp }: P
   }, []);
 
   useEffect(() => {
-    if (tab === "LINKS") return;
+    if (!KEY) {
+      setError("KLIPY is not configured. Add VITE_KLIPY_API_KEY.");
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
-
-    (async () => {
-      if (!KEY) {
-        setError("KLIPY is not configured. Add VITE_KLIPY_API_KEY.");
-        setLoading(false);
-        return;
-      }
-
+    const timer = window.setTimeout(async () => {
       setLoading(true);
+      setError("");
       try {
         const params = new URLSearchParams({
           key: KEY,
           limit: "24",
           contentfilter: "high",
-          media_filter: kind === "STICKER" ? "webp,tinywebp,gif,tinygif" : "gif,mediumgif,tinygif"
+          media_filter: tab === "STICKER" ? "webp,tinywebp,gif,tinygif" : "gif,mediumgif,tinygif"
         });
 
-        if (query.trim()) params.set("q", query.trim());
-        if (kind === "STICKER") params.set("searchfilter", "sticker");
+        const cleanQuery = query.trim();
+        if (cleanQuery) params.set("q", cleanQuery);
+        if (tab === "STICKER") params.set("searchfilter", "sticker");
 
-        const response = await client.get(query.trim() ? "/api/klipy/search" : "/api/klipy/featured", { params });
-        const data = response.data;
-        if (!cancelled) setItems(data.results || []);
+        const response = await client.get(cleanQuery ? "/api/klipy/search" : "/api/klipy/featured", { params });
+        if (!cancelled) setItems(response.data?.results || []);
       } catch (e: any) {
         if (!cancelled) setError(e.response?.data?.message || e.message || "Unable to load GIFs.");
       } finally {
         if (!cancelled) setLoading(false);
       }
-    })();
+    }, query.trim() ? 300 : 0);
 
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
-  }, [kind, query, tab]);
+  }, [tab, query]);
 
   async function sendK(x: Item) {
-    const media = pick(x, kind);
+    const media = pick(x, tab);
     if (!media || busy) return;
 
     try {
       setBusy(true);
       setError("");
-      const displayUrl = klipyContentUrl(media.url);
-      if (!(await canLoad(displayUrl, kind))) {
-        throw new Error("This GIF is unavailable through the media proxy, so it was not added.");
-      }
       await sendMedia(
         {
-          type: kind,
+          type: tab,
           provider: "KLIPY",
           providerId: x.id,
           title: x.title,
@@ -253,7 +173,7 @@ export function KlipyPicker({ onClose, replyToMessageId, isAdmin: adminProp }: P
       );
       onClose();
     } catch (e: any) {
-      setError(e.message || e.response?.data?.message || "Unable to send media.");
+      setError(e.response?.data?.message || e.message || "Unable to send media.");
       setBusy(false);
     }
   }
@@ -264,78 +184,13 @@ export function KlipyPicker({ onClose, replyToMessageId, isAdmin: adminProp }: P
     try {
       setBusy(true);
       setError("");
-      const displayUrl = proxySavedUrl(x);
-      if (!(await canLoad(displayUrl, typeOf(x)))) {
-        throw new Error("This media is unavailable through the media proxy.");
-      }
       await sendSavedMedia(x.id, replyToMessageId);
       onClose();
     } catch (e: any) {
-      setError(e.message || e.response?.data?.message || "Unable to send shared media.");
+      setError(e.response?.data?.message || e.message || "Unable to send shared media.");
       setBusy(false);
     }
   }
-
-  async function remove(x: SavedMedia) {
-    if (!isAdm || x.provider !== "LINK" || busy) return;
-    if (!window.confirm("Remove this direct-link media from the shared library?")) return;
-
-    try {
-      setBusy(true);
-      setError("");
-      await client.delete(`/api/media/saved/${encodeURIComponent(x.id)}`);
-      setSaved((current) => current.filter((y) => y.id !== x.id));
-    } catch (e: any) {
-      setError(e.response?.data?.message || "Unable to delete direct-link media.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function submit() {
-    const value = link.trim();
-    const selectedType = directType === "AUTO" ? detect(value) : directType;
-    if (!value || busy) return;
-
-    if (selectedType === "AUTO") {
-      setError("Use a direct GIF, image, or video URL with a supported extension.");
-      return;
-    }
-
-    try {
-      setBusy(true);
-      setError("");
-      new URL(value);
-      if (!(await canLoad(value, selectedType))) {
-        throw new Error("This media cannot be loaded on this network, so it was not added.");
-      }
-      await sendMediaLink(
-        { url: value, type: selectedType === "GIF" ? "GIF" : undefined, provider: "LINK" },
-        replyToMessageId
-      );
-      onClose();
-    } catch (e: any) {
-      setError(e.message || e.response?.data?.message || "Unable to send media link.");
-      setBusy(false);
-    }
-  }
-
-  function switchTab(next: Tab) {
-    setTab(next);
-    setQuery("");
-    setError("");
-  }
-
-  const tile = (x: SavedMedia) => (
-    <Tile
-      key={x.id}
-      x={x}
-      isAdmin={isAdm}
-      busy={busy}
-      send={() => void sendS(x)}
-      remove={() => void remove(x)}
-    />
-  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-3" onMouseDown={onClose}>
@@ -346,94 +201,70 @@ export function KlipyPicker({ onClose, replyToMessageId, isAdmin: adminProp }: P
         <header className="border-b border-slate-200 dark:border-slate-700 p-3 space-y-3">
           <div className="flex items-center gap-2">
             <div className="flex rounded-lg bg-slate-100 dark:bg-slate-800 p-1">
-              <button type="button" className={`px-3 py-1.5 rounded-md text-sm ${tab === "GIF" ? "bg-white dark:bg-slate-700 shadow" : "muted"}`} onClick={() => switchTab("GIF")}>GIFs</button>
-              <button type="button" className={`px-3 py-1.5 rounded-md text-sm ${tab === "STICKER" ? "bg-white dark:bg-slate-700 shadow" : "muted"}`} onClick={() => switchTab("STICKER")}>Stickers</button>
-              <button type="button" className={`px-3 py-1.5 rounded-md text-sm ${tab === "LINKS" ? "bg-white dark:bg-slate-700 shadow" : "muted"}`} onClick={() => switchTab("LINKS")}>Direct Links</button>
+              <button
+                type="button"
+                className={`px-3 py-1.5 rounded-md text-sm ${tab === "GIF" ? "bg-white dark:bg-slate-700 shadow" : "muted"}`}
+                onClick={() => { setTab("GIF"); setError(""); }}
+              >GIFs</button>
+              <button
+                type="button"
+                className={`px-3 py-1.5 rounded-md text-sm ${tab === "STICKER" ? "bg-white dark:bg-slate-700 shadow" : "muted"}`}
+                onClick={() => { setTab("STICKER"); setError(""); }}
+              >Stickers</button>
             </div>
-            <button className="iconbtn ml-auto" onClick={onClose}><X size={20} /></button>
+            <button type="button" className="iconbtn ml-auto" onClick={onClose} aria-label="Close"><X size={20} /></button>
           </div>
 
-          {tab !== "LINKS" ? (
-            <div className="relative">
-              <Search className="absolute left-3 top-2.5 muted" size={17} />
-              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`Search ${kind.toLowerCase()}…`} className="w-full rounded-lg bg-slate-100 dark:bg-slate-800 py-2 pl-9 pr-3 outline-none" autoFocus />
-            </div>
-          ) : (
-            <>
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Link2 className="absolute left-3 top-2.5 muted" size={17} />
-                  <input
-                    value={link}
-                    onChange={(e) => {
-                      setLink(e.target.value);
-                      setDirectType(detect(e.target.value));
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        void submit();
-                      }
-                    }}
-                    placeholder="Paste a direct image, GIF, or video URL…"
-                    className="w-full rounded-lg bg-slate-100 dark:bg-slate-800 py-2 pl-9 pr-3 outline-none"
-                    autoFocus
-                  />
-                </div>
-                <button type="button" className="btn-primary" disabled={!link.trim() || busy} onClick={() => void submit()}><Send size={16} /> Send</button>
-              </div>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="muted">Type:</span>
-                {(["AUTO", "GIF", "IMAGE", "VIDEO"] as DirectKind[]).map((x) => (
-                  <button key={x} type="button" onClick={() => setDirectType(x)} className={`rounded-full px-2.5 py-1 ${directType === x ? "bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300" : "bg-slate-100 dark:bg-slate-800 muted"}`}>
-                    {x === "AUTO" ? "Auto" : x}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
+          <div className="relative">
+            <Search className="absolute left-3 top-2.5 muted" size={17} />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={`Search ${tab.toLowerCase()}…`}
+              className="w-full rounded-lg bg-slate-100 dark:bg-slate-800 py-2 pl-9 pr-3 outline-none"
+              autoFocus
+            />
+          </div>
         </header>
 
         <div className="p-3 overflow-y-auto max-h-[65vh]">
           {error && <div className="error mb-3">{error}</div>}
 
-          {tab === "LINKS" ? (
-            <>
-              {savedLoading ? (
-                <div className="py-12 text-center muted">Checking shared media…</div>
-              ) : links.length === 0 ? (
-                <div className="py-12 text-center muted">No usable shared links.</div>
-              ) : (
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">{links.map(tile)}</div>
-              )}
-            </>
+          <div className="mb-2">
+            <div className="font-semibold text-sm">Shared {tab === "GIF" ? "GIFs" : "stickers"}</div>
+            <div className="muted text-xs">Available to everyone.</div>
+          </div>
+
+          {savedLoading ? (
+            <div className="py-4 text-center muted">Loading shared media…</div>
+          ) : shared.length > 0 ? (
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-5">
+              {shared.map((x) => (
+                <Tile key={x.id} x={x} busy={busy} send={() => void sendS(x)} />
+              ))}
+            </div>
+          ) : null}
+
+          <div className="font-semibold text-sm mb-2">{query.trim() ? "Search results" : "Discover"}</div>
+          {loading ? (
+            <div className="py-12 text-center muted">Loading…</div>
           ) : (
-            <>
-              <div className="mb-2">
-                <div className="font-semibold text-sm">Shared {kind === "GIF" ? "GIFs" : "stickers"}</div>
-                <div className="muted text-xs">Available to everyone. Admins can remove broken items.</div>
-              </div>
-
-              {!savedLoading && shared.length > 0 && (
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-5">{shared.map(tile)}</div>
-              )}
-
-              <div className="font-semibold text-sm mb-2">{query.trim() ? "Search results" : "Discover"}</div>
-              {loading ? (
-                <div className="py-12 text-center muted">Loading…</div>
-              ) : (
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                  {items.map((x) => {
-                    const media = pick(x, kind);
-                    return media ? (
-                      <button key={x.id} type="button" disabled={busy} onClick={() => void sendK(x)} className="overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800 hover:ring-2 hover:ring-indigo-400 transition disabled:opacity-60">
-                        <img src={klipyContentUrl(media.preview)} alt={x.title || kind} loading="lazy" className="w-full h-28 object-contain" />
-                      </button>
-                    ) : null;
-                  })}
-                </div>
-              )}
-            </>
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+              {items.map((x) => {
+                const media = pick(x, tab);
+                return media ? (
+                  <button
+                    key={x.id}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void sendK(x)}
+                    className="overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800 hover:ring-2 hover:ring-indigo-400 transition disabled:opacity-60"
+                  >
+                    <img src={media.preview} alt={x.title || tab} loading="lazy" className="w-full h-28 object-contain" />
+                  </button>
+                ) : null;
+              })}
+            </div>
           )}
         </div>
       </section>
