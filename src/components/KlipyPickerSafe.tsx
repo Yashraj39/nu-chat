@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Search, X } from "lucide-react";
-import { client, sendMedia } from "../api";
+import { client, klipyMediaUrl, sendMedia } from "../api";
 
 type Kind = "GIF" | "STICKER";
 type Item = {
@@ -15,8 +15,8 @@ const KEY = import.meta.env.VITE_KLIPY_API_KEY as string | undefined;
 function pick(x: Item, kind: Kind) {
   const formats = x.media_formats || {};
   const names = kind === "STICKER"
-    ? ["webp", "tinywebp", "gif", "tinygif"]
-    : ["gif", "mediumgif", "tinygif", "webp"];
+    ? ["webp", "tinywebp"]
+    : ["mediumgif", "tinygif"];
 
   for (const name of names) {
     const format = formats[name];
@@ -26,6 +26,21 @@ function pick(x: Item, kind: Kind) {
         preview: format.preview || format.url,
         dims: format.dims || []
       };
+    }
+  }
+  return null;
+}
+
+function pickPreview(x: Item, kind: Kind) {
+  const formats = x.media_formats || {};
+  const names = kind === "STICKER"
+    ? ["tinywebp", "webp"]
+    : ["tinygif", "mediumgif"];
+
+  for (const name of names) {
+    const format = formats[name];
+    if (format?.url) {
+      return format.preview || format.url;
     }
   }
   return null;
@@ -53,9 +68,9 @@ export function KlipyPicker({ onClose, replyToMessageId }: Props) {
       try {
         const params = new URLSearchParams({
           key: KEY,
-          limit: "24",
+          limit: "12",
           contentfilter: "high",
-          media_filter: tab === "STICKER" ? "webp,tinywebp,gif,tinygif" : "gif,mediumgif,tinygif"
+          media_filter: tab === "STICKER" ? "webp,tinywebp" : "mediumgif,tinygif"
         });
 
         const cleanQuery = query.trim();
@@ -149,7 +164,8 @@ export function KlipyPicker({ onClose, replyToMessageId }: Props) {
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
               {items.map((x) => {
                 const media = pick(x, tab);
-                return media ? (
+                const preview = pickPreview(x, tab);
+                return media && preview ? (
                   <button
                     key={x.id}
                     type="button"
@@ -157,7 +173,7 @@ export function KlipyPicker({ onClose, replyToMessageId }: Props) {
                     onClick={() => void sendK(x)}
                     className="overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800 hover:ring-2 hover:ring-indigo-400 transition disabled:opacity-60"
                   >
-                    <img src={media.preview} alt={x.title || tab} loading="lazy" className="w-full h-28 object-contain" />
+                    <img src={klipyMediaUrl(preview)} alt={x.title || tab} loading="lazy" className="w-full h-28 object-contain" />
                   </button>
                 ) : null;
               })}
