@@ -87,8 +87,6 @@ export function App() {
         };
     }, []);
 
-    // Keep the active display-name lease alive while the app is open.
-    // The backend expires a lease automatically when these heartbeats stop.
     useEffect(() => {
         if (!user) return;
 
@@ -232,25 +230,34 @@ function Shell({
     const location = useLocation();
 
     const [unreadCount, setUnreadCount] = useState(0);
-    const [incomingMessage, setIncomingMessage] =
-        useState<Message | null>(null);
+    const [incomingMessage, setIncomingMessage] = useState<Message | null>(null);
+    const [typingUsers, setTypingUsers] = useState<Record<string, string>>({});
 
-    const { connected } = useSocket(
+    const handleTyping = (event: any) => {
+        const userId = String(event?.userId || "");
+        const userName = String(event?.userName || "Someone");
+        if (!userId || userId === user.id) return;
+
+        setTypingUsers((current) => {
+            const next = { ...current };
+            if (event?.typing) next[userId] = userName;
+            else delete next[userId];
+            return next;
+        });
+    };
+
+    const { connected, send: sendSocket } = useSocket(
         (message: Message) => {
             setIncomingMessage(message);
 
-            if (message.senderId === user.id) {
-                return;
-            }
+            if (message.senderId === user.id) return;
 
             const isActuallyLookingAtChat =
                 document.visibilityState === "visible" &&
                 document.hasFocus() &&
                 location.pathname === "/chat";
 
-            if (isActuallyLookingAtChat) {
-                return;
-            }
+            if (isActuallyLookingAtChat) return;
 
             setUnreadCount((current) => current + 1);
 
@@ -260,32 +267,24 @@ function Shell({
             ) {
                 let body = "You received a new message.";
 
-                if (message.type === "TEXT" && message.content) {
-                    body = message.content;
-                } else if (message.type === "IMAGE") {
-                    body = "Sent an image.";
-                } else if (message.type === "FILE") {
-                    body = `Sent a file${message.file?.originalName
-                        ? `: ${message.file.originalName}`
-                        : "."}`;
-                } else if (message.type === "GIF") {
-                    body = "Sent a GIF.";
-                } else if (message.type === "STICKER") {
-                    body = "Sent a sticker.";
-                }
+                if (message.type === "TEXT" && message.content) body = message.content;
+                else if (message.type === "IMAGE") body = "Sent an image.";
+                else if (message.type === "FILE") {
+                    body = `Sent a file${message.file?.originalName ? `: ${message.file.originalName}` : "."}`;
+                } else if (message.type === "GIF") body = "Sent a GIF.";
+                else if (message.type === "STICKER") body = "Sent a sticker.";
 
-                new Notification(
-                    message.senderName || "New message",
-                    {
-                        body,
-                        tag: "chit-chat-message",
-                        icon: "/favicon.ico",
-                    }
-                );
+                new Notification(message.senderName || "New message", {
+                    body,
+                    tag: "chit-chat-message",
+                    icon: "/favicon.ico",
+                });
             }
         },
         () => {},
-        () => {}
+        () => {},
+        undefined,
+        handleTyping
     );
 
     useEffect(() => {
@@ -298,10 +297,7 @@ function Shell({
     }, [location.pathname]);
 
     useEffect(() => {
-        document.title =
-            unreadCount > 0
-                ? `(${unreadCount}) Chit Chat`
-                : "Chit Chat";
+        document.title = unreadCount > 0 ? `(${unreadCount}) Chit Chat` : "Chit Chat";
     }, [unreadCount]);
 
     useEffect(() => {
@@ -311,9 +307,7 @@ function Shell({
                 document.visibilityState === "visible" &&
                 document.hasFocus();
 
-            if (chatIsActive) {
-                setUnreadCount(0);
-            }
+            if (chatIsActive) setUnreadCount(0);
         }
 
         document.addEventListener("visibilitychange", clearUnreadIfChatIsActive);
@@ -336,6 +330,11 @@ function Shell({
     }, [location.pathname]);
 
     const gameRoomId = location.pathname.match(/^\/games\/([^/]+)$/)?.[1];
+
+    function sendTyping(typing: boolean) {
+        if (!connected) return;
+        sendSocket("/app/chat.typing", { typing });
+    }
 
     return (
         <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
@@ -370,19 +369,10 @@ function Shell({
                 </nav>
 
                 <div className="flex items-center gap-2">
-                    <button
-                        className="iconbtn"
-                        title="Toggle theme"
-                        onClick={() => setDark(!dark)}
-                    >
+                    <button className="iconbtn" title="Toggle theme" onClick={() => setDark(!dark)}>
                         {dark ? <Sun size={18} /> : <Moon size={18} />}
                     </button>
-
-                    <button
-                        className="iconbtn"
-                        title="Logout"
-                        onClick={() => void onLogout()}
-                    >
+                    <button className="iconbtn" title="Logout" onClick={() => void onLogout()}>
                         <LogOut size={18} />
                     </button>
                 </div>
@@ -390,7 +380,18 @@ function Shell({
 
             <Routes>
                 <Route path="/" element={<Navigate to="/chat" replace />} />
-                <Route path="/chat" element={<ChatPage user={user} incomingMessage={incomingMessage} connected={connected} />} />
+                <Route
+                    path="/chat"
+                    element={
+                        <ChatPage
+                            user={user}
+                            incomingMessage={incomingMessage}
+                            connected={connected}
+                            typingUsers={typingUsers}
+                            onTyping={sendTyping}
+                        />
+                    }
+                />
                 <Route path="/games" element={<GamesPage user={user} />} />
                 <Route path="/games/:id" element={<GameRoomPage user={user} />} />
                 <Route path="/admin" element={<AdminPage user={user} />} />
