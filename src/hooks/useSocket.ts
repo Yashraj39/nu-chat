@@ -39,7 +39,8 @@ export function useSocket(
     onChat: (x: any) => void,
     onGames: (x: any) => void,
     onGameState: (x: any) => void,
-    roomId?: string
+    roomId?: string,
+    onTyping?: (x: any) => void
 ) {
     const [connected, setConnected] = useState(false);
     const clientRef = useRef<Client | null>(null);
@@ -47,10 +48,12 @@ export function useSocket(
     const onChatRef = useRef(onChat);
     const onGamesRef = useRef(onGames);
     const onGameStateRef = useRef(onGameState);
+    const onTypingRef = useRef(onTyping);
 
     useEffect(() => { onChatRef.current = onChat; }, [onChat]);
     useEffect(() => { onGamesRef.current = onGames; }, [onGames]);
     useEffect(() => { onGameStateRef.current = onGameState; }, [onGameState]);
+    useEffect(() => { onTypingRef.current = onTyping; }, [onTyping]);
 
     useEffect(() => {
         const token = sessionStorage.getItem("pulse_token");
@@ -96,6 +99,15 @@ export function useSocket(
                     catch (error) { console.error("Invalid game WebSocket message:", error); }
                 })
             );
+
+            if (onTypingRef.current) {
+                subscriptionsRef.current.push(
+                    client.subscribe("/topic/typing", (message: IMessage) => {
+                        try { onTypingRef.current?.(JSON.parse(message.body)); }
+                        catch (error) { console.error("Invalid typing WebSocket message:", error); }
+                    })
+                );
+            }
 
             subscriptionsRef.current.push(
                 client.subscribe("/topic/game/rooms/remove", (message: IMessage) => {
