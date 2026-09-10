@@ -34,12 +34,23 @@ function MessageBubble({m,own,canDelete,onDelete,onReply,onJump,onMediaLoaded}:{
     const displayUrl=file?.driveFileId ? file.url : file?.publicId ? fileContentUrl(file.publicId) : file?.url;
     return <div className={`msgrow ${own?"own":""}`}><article className={`bubble ${own?"ownbubble":""}`}><div className="flex items-center justify-between gap-3"><span className="sender">{own?"You":m.senderName}</span><div className="flex items-center gap-1"><button className="tiny" title="Reply" onClick={()=>onReply(m)}><Reply size={14}/></button>{canDelete&&!m.deleted&&<button className="tiny" title="Delete" onClick={()=>onDelete(m.id)}><Trash2 size={14}/>}</div></div>{m.replyTo&&<ReplyQuote reply={m.replyTo} onClick={()=>onJump(m.replyTo!.messageId)}/>} {m.deleted?<p className="deleted">This message was deleted</p>:m.type==="TEXT"?<p className="whitespace-pre-wrap break-words">{m.content}</p>:m.type==="GIF"||m.type==="STICKER"?<MediaBubble media={media} type={m.type} messageId={m.id} onLoaded={onMediaLoaded}/>:!file?<p className="muted">File metadata is unavailable.</p>:isRasterImage?<div><a href={displayUrl} target="_blank" rel="noreferrer"><img className="chat-image" src={displayUrl} alt={file.originalName} loading="lazy" onLoad={onMediaLoaded}/></a><p className="filecaption">{file.originalName}</p></div>:isVideo?<div><video className="max-w-full rounded-lg" controls preload="none" onLoadedMetadata={onMediaLoaded}><source src={displayUrl} type={mime}/></video><p className="filecaption">{file.originalName}</p><FileCard messageId={m.id} file={file} icon={<FileVideo size={18}/>} /></div>:isAudio?<div className="space-y-2"><audio className="w-full" controls preload="none"><source src={displayUrl} type={mime}/></audio><p className="filecaption">{file.originalName}</p><FileCard messageId={m.id} file={file} icon={<FileAudio size={18}/>} /></div>:<FileCard messageId={m.id} file={file} icon={getFileIcon(mime)}/>}<time>{time}</time></article></div>;
 }
+function proxyKlipyIfNeeded(url:string){
+    if(!url)return "";
+    try{
+        const parsed=new URL(url,window.location.origin);
+        const host=parsed.hostname.toLowerCase();
+        if(host==="klipy.com"||host.endsWith(".klipy.com")) return klipyMediaUrl(url);
+    }catch{
+        // Keep malformed or already-proxied legacy URLs unchanged so old chat history still renders.
+    }
+    return url;
+}
 function MediaBubble({media,type,messageId,onLoaded}:{media:Message["media"];type:"GIF"|"STICKER";messageId:string;onLoaded:()=>void}){
     const isKlipy=media?.provider?.toUpperCase()==="KLIPY";
     const sourceUrl=media?.previewUrl||media?.url||"";
-    const proxyUrl=isKlipy&&sourceUrl?klipyMediaUrl(sourceUrl):sourceUrl;
+    const proxyUrl=isKlipy?proxyKlipyIfNeeded(sourceUrl):sourceUrl;
     const fallbackSource=media?.url||"";
-    const fallbackUrl=isKlipy&&fallbackSource?klipyMediaUrl(fallbackSource):fallbackSource;
+    const fallbackUrl=isKlipy?proxyKlipyIfNeeded(fallbackSource):fallbackSource;
     const [fallback,setFallback]=useState(false);
     if(!sourceUrl)return <p className="muted">Media unavailable.</p>;
     const src=!fallback?proxyUrl:fallbackUrl;
