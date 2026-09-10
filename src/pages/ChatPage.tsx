@@ -15,11 +15,11 @@ type ChatPageProps = {
 
 export function ChatPage({ user, incomingMessage, connected, typingUsers, onTyping }: ChatPageProps) {
     const [msgs, setMsgs] = useState<Message[]>([]), [text, setText] = useState(""), [progress, setProgress] = useState<number | null>(null), [error, setError] = useState(""), [nearBottom, setNearBottom] = useState(true), [replyingTo, setReplyingTo] = useState<Message | null>(null), [showMediaPicker, setShowMediaPicker] = useState(false);
-    const end = useRef<HTMLDivElement>(null), list = useRef<HTMLDivElement>(null), stickToBottomRef = useRef(true), initializingRef = useRef(true), messageRefs = useRef<Record<string, HTMLDivElement | null>>({}), typingRef = useRef(false), typingTimerRef = useRef<number | null>(null);
+    const end = useRef<HTMLDivElement>(null), list = useRef<HTMLDivElement>(null), stickToBottomRef = useRef(true), initializingRef = useRef(true), messageRefs = useRef<Record<string, HTMLDivElement | null>>({}), typingRef = useRef(false), typingTimerRef = useRef<number | null>(null), typingHeartbeatRef = useRef<number | null>(null);
     useEffect(() => { const old = window.history.scrollRestoration; window.history.scrollRestoration = "manual"; return () => { window.history.scrollRestoration = old; }; }, []);
     useEffect(() => { if (!incomingMessage) return; setMsgs(current => current.some(x => x.id === incomingMessage.id) ? current.map(x => x.id === incomingMessage.id ? incomingMessage : x) : [...current, incomingMessage].sort((a,b) => a.createdAt.localeCompare(b.createdAt))); }, [incomingMessage]);
     useEffect(() => { let cancelled=false; stickToBottomRef.current=true; initializingRef.current=true; messages().then(loaded=>{if(cancelled)return;setMsgs(loaded);const force=()=>{const c=list.current;if(!c)return;stickToBottomRef.current=true;c.scrollTop=c.scrollHeight;end.current?.scrollIntoView({behavior:"auto",block:"end"});};requestAnimationFrame(()=>{force();requestAnimationFrame(()=>{force();setTimeout(force,50);setTimeout(force,150);setTimeout(()=>{force();initializingRef.current=false;setNearBottom(true);},400);});});}).catch(()=>{if(!cancelled){initializingRef.current=false;setError("Unable to load messages.");}});return()=>{cancelled=true;};},[]);
-    useEffect(() => () => { if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current); if (typingRef.current) onTyping(false); }, []);
+    useEffect(() => () => { if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current); if (typingHeartbeatRef.current) window.clearInterval(typingHeartbeatRef.current); if (typingRef.current) onTyping(false); }, [onTyping]);
     function scrollToBottom(behavior:ScrollBehavior="smooth"){const c=list.current;if(!c||!stickToBottomRef.current)return;c.scrollTo({top:c.scrollHeight,behavior});}
     useEffect(()=>{if(!initializingRef.current)scrollToBottom();},[msgs]);
     useEffect(()=>{const c=list.current;if(!c||typeof ResizeObserver==="undefined")return;const o=new ResizeObserver(()=>{if(stickToBottomRef.current)c.scrollTop=c.scrollHeight;});o.observe(c);return()=>o.disconnect();},[]);
@@ -30,28 +30,31 @@ export function ChatPage({ user, incomingMessage, connected, typingUsers, onTypi
     function cancelReply(){setReplyingTo(null);}
     function setTypingState(value:string){
         setText(value);
-        if(!connected) return;
+        if(!connected)return;
         const hasText=value.trim().length>0;
-        if(hasText&&!typingRef.current){typingRef.current=true;onTyping(true);}
-        if(!hasText&&typingRef.current){typingRef.current=false;onTyping(false);}
-        if(typingTimerRef.current)window.clearTimeout(typingTimerRef.current);
-        if(hasText){
-            typingTimerRef.current=window.setTimeout(()=>{
-                typingRef.current=false;
-                onTyping(false);
-            },1500);
+        if(hasText&&!typingRef.current){
+            typingRef.current=true;
+            onTyping(true);
+            if(typingHeartbeatRef.current)window.clearInterval(typingHeartbeatRef.current);
+            typingHeartbeatRef.current=window.setInterval(()=>{ if(typingRef.current)onTyping(true); },2000);
         }
+        if(!hasText){stopTyping();return;}
+        if(typingTimerRef.current)window.clearTimeout(typingTimerRef.current);
+        typingTimerRef.current=window.setTimeout(()=>stopTyping(),1500);
     }
     function stopTyping(){
         if(typingTimerRef.current)window.clearTimeout(typingTimerRef.current);
         typingTimerRef.current=null;
+        if(typingHeartbeatRef.current)window.clearInterval(typingHeartbeatRef.current);
+        typingHeartbeatRef.current=null;
         if(typingRef.current){typingRef.current=false;onTyping(false);}
     }
     async function submit(){if(!text.trim()||!connected)return;stopTyping();try{await sendText(text,replyingTo?.id);setText("");setReplyingTo(null);}catch(e:any){setError(e.response?.data?.message||"Send failed.");}}
     async function attach(e:React.ChangeEvent<HTMLInputElement>){stopTyping();const file=e.target.files?.[0];e.target.value="";if(!file)return;try{setError("");setProgress(0);const meta=await upload(file,setProgress);await sendFile(meta,replyingTo?.id);setReplyingTo(null);}catch(e:any){setError(e.response?.data?.message||e.message||"Upload failed");}finally{setProgress(null);}}
     async function remove(id:string){try{await deleteMessage(id);}catch(e:any){setError(e.response?.data?.message||"Delete failed");}}
-    const names=Object.values(typingUsers).filter(Boolean);
-    const typingLabel=names.length===1?`${names[0]} is typing`:names.length===2?`${names[0]} and ${names[1]} are typing`:`${names[0]} and ${names.length-1} others are typing`;
+    const names=Object.entries(typingUsers).filter(([id,name])=>id&&id!==String(user.id)&&typeof name==="string"&&name.trim().length>0).map(([,name])=>name.trim());
+    const uniqueNames=[...new Set(names)];
+    const typingLabel=uniqueNames.length===0?"":uniqueNames.length===1?`${uniqueNames[0]} is typing`:uniqueNames.length===2?`${uniqueNames[0]} and ${uniqueNames[1]} are typing`:`${uniqueNames[0]} and ${uniqueNames.length-1} others are typing`;
     return <main className="page"><section className="chat-shell"><div className="chat-head"><div><h1 className="font-bold text-lg">Campus Group</h1><p className="muted text-xs">Everyone can chat here</p></div><div className="flex items-center gap-2"><div className="flex items-center gap-2 rounded-full border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-1.5" title="Your display name"><span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">You</span><span className="max-w-[180px] truncate text-xs font-bold text-slate-700 dark:text-slate-200">{user.displayName}</span></div><div className={`status ${connected?"online":"offline"}`}>{connected?<Wifi size={14}/>:<WifiOff size={14}/>} {connected?"Connected":"Reconnecting…"}</div></div></div>
         <div ref={list} onScroll={handleScroll} className="message-list" style={{overflowAnchor:"none"}}>{msgs.map(message=><div key={message.id} ref={el=>{messageRefs.current[message.id]=el;}}><MessageBubble m={message} own={message.senderId===user.id} canDelete={message.senderId===user.id||user.role==="ADMIN"} onDelete={remove} onReply={replyTo} onJump={jumpToMessage} onMediaLoaded={handleMediaLoaded}/></div>)}<div ref={end}/></div>
         {!nearBottom&&<button className="newmsg" onClick={()=>{stickToBottomRef.current=true;setNearBottom(true);requestAnimationFrame(()=>end.current?.scrollIntoView({behavior:"smooth",block:"end"}));}}><ArrowDown size={15}/>New messages</button>}
@@ -64,7 +67,7 @@ function ReplyComposerPreview({message,onCancel,onJump}:{message:Message;onCance
 function MessageBubble({m,own,canDelete,onDelete,onReply,onJump,onMediaLoaded}:{m:Message;own:boolean;canDelete:boolean;onDelete:(id:string)=>void;onReply:(m:Message)=>void;onJump:(id:string)=>void;onMediaLoaded:()=>void}){
     const time=new Date(m.createdAt).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}), file=m.file, media=m.media, mime=file?.mimeType?.toLowerCase()||"application/octet-stream"; const isRasterImage=["image/jpeg","image/png","image/webp","image/gif","image/bmp","image/avif"].includes(mime), isVideo=mime.startsWith("video/"), isAudio=mime.startsWith("audio/");
     const displayUrl=file?.driveFileId ? file.url : file?.publicId ? fileContentUrl(file.publicId) : file?.url;
-    return <div className={`msgrow ${own?"own":""}`}><article className={`bubble ${own?"ownbubble":""}`}><div className="flex items-center justify-between gap-3"><span className="sender">{own?"You":m.senderName}</span><div className="flex items-center gap-1"><button className="tiny" title="Reply" onClick={()=>onReply(m)}><Reply size={14}/></button>{canDelete&&!m.deleted&&<button className="tiny" title="Delete" onClick={()=>onDelete(m.id)}><Trash2 size={14}/></button>}</div></div>{m.replyTo&&<ReplyQuote reply={m.replyTo} onClick={()=>onJump(m.replyTo!.messageId)}/>} {m.deleted?<p className="deleted">This message was deleted</p>:m.type==="TEXT"?<p className="whitespace-pre-wrap break-words">{m.content}</p>:m.type==="GIF"||m.type==="STICKER"?<MediaBubble media={media} type={m.type} messageId={m.id} onLoaded={onMediaLoaded}/>:!file?<p className="muted">File metadata is unavailable.</p>:isRasterImage?<div><a href={displayUrl} target="_blank" rel="noreferrer"><img className="chat-image" src={displayUrl} alt={file.originalName} loading="lazy" onLoad={onMediaLoaded}/></a><p className="filecaption">{file.originalName}</p></div>:isVideo?<div><video className="max-w-full rounded-lg" controls preload="none" onLoadedMetadata={onMediaLoaded}><source src={displayUrl} type={mime}/></video><p className="filecaption">{file.originalName}</p><FileCard messageId={m.id} file={file} icon={<FileVideo size={18}/>} /></div>:isAudio?<div className="space-y-2"><audio className="w-full" controls preload="none"><source src={displayUrl} type={mime}/></audio><p className="filecaption">{file.originalName}</p><FileCard messageId={m.id} file={file} icon={<FileAudio size={18}/>} /></div>:<FileCard messageId={m.id} file={file} icon={getFileIcon(mime)}/>}<time>{time}</time></article></div>;
+    return <div className={`msgrow ${own?"own":""}`}><article className={`bubble ${own?"ownbubble":""}`}><div className="flex items-center justify-between gap-3"><span className="sender">{own?"You":m.senderName}</span><div className="flex items-center gap-1"><button className="tiny" title="Reply" onClick={()=>onReply(m)}><Reply size={14}/></button>{canDelete&&!m.deleted&&<button className="tiny" title="Delete" onClick={()=>onDelete(m.id)}><Trash2 size={14}/>}</div></div>{m.replyTo&&<ReplyQuote reply={m.replyTo} onClick={()=>onJump(m.replyTo!.messageId)}/>} {m.deleted?<p className="deleted">This message was deleted</p>:m.type==="TEXT"?<p className="whitespace-pre-wrap break-words">{m.content}</p>:m.type==="GIF"||m.type==="STICKER"?<MediaBubble media={media} type={m.type} messageId={m.id} onLoaded={onMediaLoaded}/>:!file?<p className="muted">File metadata is unavailable.</p>:isRasterImage?<div><a href={displayUrl} target="_blank" rel="noreferrer"><img className="chat-image" src={displayUrl} alt={file.originalName} loading="lazy" onLoad={onMediaLoaded}/></a><p className="filecaption">{file.originalName}</p></div>:isVideo?<div><video className="max-w-full rounded-lg" controls preload="none" onLoadedMetadata={onMediaLoaded}><source src={displayUrl} type={mime}/></video><p className="filecaption">{file.originalName}</p><FileCard messageId={m.id} file={file} icon={<FileVideo size={18}/>} /></div>:isAudio?<div className="space-y-2"><audio className="w-full" controls preload="none"><source src={displayUrl} type={mime}/></audio><p className="filecaption">{file.originalName}</p><FileCard messageId={m.id} file={file} icon={<FileAudio size={18}/>} /></div>:<FileCard messageId={m.id} file={file} icon={getFileIcon(mime)}/>}<time>{time}</time></article></div>;
 }
 function proxyKlipyIfNeeded(url:string){
     if(!url)return "";
