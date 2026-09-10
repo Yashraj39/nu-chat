@@ -220,6 +220,10 @@ export function fileContentUrl(publicId: string) {
     return `${API}/api/files/content?publicId=${encodeURIComponent(publicId)}`;
 }
 
+export function klipyMediaUrl(url: string) {
+    return `${API}/api/klipy/media?url=${encodeURIComponent(url)}`;
+}
+
 export async function deleteMessage(id: string) {
     return (await client.delete(`/api/messages/${id}`)).data;
 }
