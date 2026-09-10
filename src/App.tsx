@@ -9,6 +9,7 @@ import {
 import {
     useState,
     useEffect,
+    useRef,
 } from "react";
 
 import {
@@ -157,10 +158,7 @@ function JoinPage({
             const joinedUser = await join(name, code);
             onJoined(joinedUser);
         } catch (error: any) {
-            setError(
-                error?.response?.data?.message ||
-                "Could not join chat."
-            );
+            setError(error?.response?.data?.message || "Could not join chat.");
         } finally {
             setBusy(false);
         }
@@ -168,18 +166,11 @@ function JoinPage({
 
     return (
         <main className="min-h-screen grid place-items-center p-5 bg-slate-950">
-            <form
-                onSubmit={go}
-                className="panel w-full max-w-md p-8 space-y-5"
-            >
+            <form onSubmit={go} className="panel w-full max-w-md p-8 space-y-5">
                 <div>
                     <div className="logo">P</div>
-                    <h1 className="text-3xl font-bold mt-4">
-                        Welcome 👋
-                    </h1>
-                    <p className="muted mt-2">
-                        Choose your name to join the group.
-                    </p>
+                    <h1 className="text-3xl font-bold mt-4">Welcome 👋</h1>
+                    <p className="muted mt-2">Choose your name to join the group.</p>
                 </div>
 
                 <input
@@ -192,9 +183,7 @@ function JoinPage({
                 />
 
                 <details>
-                    <summary className="cursor-pointer muted text-sm">
-                        Admin access
-                    </summary>
+                    <summary className="cursor-pointer muted text-sm">Admin access</summary>
                     <input
                         className="input mt-3"
                         placeholder="Admin invite code (optional)"
@@ -205,10 +194,7 @@ function JoinPage({
 
                 {error && <div className="error">{error}</div>}
 
-                <button
-                    className="btn-primary w-full"
-                    disabled={busy || name.trim().length < 1}
-                >
+                <button className="btn-primary w-full" disabled={busy || name.trim().length < 1}>
                     {busy ? "Joining…" : "Join Chat"}
                 </button>
             </form>
@@ -228,50 +214,63 @@ function Shell({
     onLogout: () => void | Promise<void>;
 }) {
     const location = useLocation();
-
     const [unreadCount, setUnreadCount] = useState(0);
     const [incomingMessage, setIncomingMessage] = useState<Message | null>(null);
     const [typingUsers, setTypingUsers] = useState<Record<string, string>>({});
+    const typingTimersRef = useRef<Record<string, number>>({});
 
     const handleTyping = (event: any) => {
         const userId = String(event?.userId || "");
         const userName = String(event?.userName || "Someone");
         if (!userId || userId === user.id) return;
 
-        setTypingUsers((current) => {
-            const next = { ...current };
-            if (event?.typing) next[userId] = userName;
-            else delete next[userId];
-            return next;
-        });
+        const existing = typingTimersRef.current[userId];
+        if (existing) window.clearTimeout(existing);
+
+        if (event?.typing) {
+            setTypingUsers((current) => ({ ...current, [userId]: userName }));
+            typingTimersRef.current[userId] = window.setTimeout(() => {
+                setTypingUsers((current) => {
+                    const next = { ...current };
+                    delete next[userId];
+                    return next;
+                });
+                delete typingTimersRef.current[userId];
+            }, 3000);
+        } else {
+            setTypingUsers((current) => {
+                const next = { ...current };
+                delete next[userId];
+                return next;
+            });
+            delete typingTimersRef.current[userId];
+        }
     };
+
+    useEffect(() => () => {
+        Object.values(typingTimersRef.current).forEach(window.clearTimeout);
+        typingTimersRef.current = {};
+    }, []);
 
     const { connected, send: sendSocket } = useSocket(
         (message: Message) => {
             setIncomingMessage(message);
-
             if (message.senderId === user.id) return;
 
             const isActuallyLookingAtChat =
                 document.visibilityState === "visible" &&
                 document.hasFocus() &&
                 location.pathname === "/chat";
-
             if (isActuallyLookingAtChat) return;
 
             setUnreadCount((current) => current + 1);
 
-            if (
-                "Notification" in window &&
-                Notification.permission === "granted"
-            ) {
+            if ("Notification" in window && Notification.permission === "granted") {
                 let body = "You received a new message.";
-
                 if (message.type === "TEXT" && message.content) body = message.content;
                 else if (message.type === "IMAGE") body = "Sent an image.";
-                else if (message.type === "FILE") {
-                    body = `Sent a file${message.file?.originalName ? `: ${message.file.originalName}` : "."}`;
-                } else if (message.type === "GIF") body = "Sent a GIF.";
+                else if (message.type === "FILE") body = `Sent a file${message.file?.originalName ? `: ${message.file.originalName}` : "."}`;
+                else if (message.type === "GIF") body = "Sent a GIF.";
                 else if (message.type === "STICKER") body = "Sent a sticker.";
 
                 new Notification(message.senderName || "New message", {
@@ -290,10 +289,7 @@ function Shell({
     useEffect(() => {
         if (location.pathname !== "/chat") return;
         if (!("Notification" in window)) return;
-
-        if (Notification.permission === "default") {
-            Notification.requestPermission().catch(() => {});
-        }
+        if (Notification.permission === "default") Notification.requestPermission().catch(() => {});
     }, [location.pathname]);
 
     useEffect(() => {
@@ -302,17 +298,11 @@ function Shell({
 
     useEffect(() => {
         function clearUnreadIfChatIsActive() {
-            const chatIsActive =
-                location.pathname === "/chat" &&
-                document.visibilityState === "visible" &&
-                document.hasFocus();
-
+            const chatIsActive = location.pathname === "/chat" && document.visibilityState === "visible" && document.hasFocus();
             if (chatIsActive) setUnreadCount(0);
         }
-
         document.addEventListener("visibilitychange", clearUnreadIfChatIsActive);
         window.addEventListener("focus", clearUnreadIfChatIsActive);
-
         return () => {
             document.removeEventListener("visibilitychange", clearUnreadIfChatIsActive);
             window.removeEventListener("focus", clearUnreadIfChatIsActive);
@@ -320,13 +310,7 @@ function Shell({
     }, [location.pathname]);
 
     useEffect(() => {
-        if (
-            location.pathname === "/chat" &&
-            document.visibilityState === "visible" &&
-            document.hasFocus()
-        ) {
-            setUnreadCount(0);
-        }
+        if (location.pathname === "/chat" && document.visibilityState === "visible" && document.hasFocus()) setUnreadCount(0);
     }, [location.pathname]);
 
     const gameRoomId = location.pathname.match(/^\/games\/([^/]+)$/)?.[1];
@@ -348,50 +332,21 @@ function Shell({
                     <Link to="/chat" className="navlink">
                         <MessageCircle size={18} />
                         Chat
-                        {unreadCount > 0 && (
-                            <span className="ml-1 inline-flex min-w-[20px] h-5 px-1 items-center justify-center rounded-full bg-red-500 text-white text-[11px] font-bold">
-                                {unreadCount > 99 ? "99+" : unreadCount}
-                            </span>
-                        )}
+                        {unreadCount > 0 && <span className="ml-1 inline-flex min-w-[20px] h-5 px-1 items-center justify-center rounded-full bg-red-500 text-white text-[11px] font-bold">{unreadCount > 99 ? "99+" : unreadCount}</span>}
                     </Link>
-
-                    <Link to="/games" className="navlink">
-                        <Gamepad2 size={18} />
-                        Games
-                    </Link>
-
-                    {user.role === "ADMIN" && (
-                        <Link to="/admin" className="navlink">
-                            <ShieldCheck size={18} />
-                            Admin
-                        </Link>
-                    )}
+                    <Link to="/games" className="navlink"><Gamepad2 size={18} />Games</Link>
+                    {user.role === "ADMIN" && <Link to="/admin" className="navlink"><ShieldCheck size={18} />Admin</Link>}
                 </nav>
 
                 <div className="flex items-center gap-2">
-                    <button className="iconbtn" title="Toggle theme" onClick={() => setDark(!dark)}>
-                        {dark ? <Sun size={18} /> : <Moon size={18} />}
-                    </button>
-                    <button className="iconbtn" title="Logout" onClick={() => void onLogout()}>
-                        <LogOut size={18} />
-                    </button>
+                    <button className="iconbtn" title="Toggle theme" onClick={() => setDark(!dark)}>{dark ? <Sun size={18} /> : <Moon size={18} />}</button>
+                    <button className="iconbtn" title="Logout" onClick={() => void onLogout()}><LogOut size={18} /></button>
                 </div>
             </header>
 
             <Routes>
                 <Route path="/" element={<Navigate to="/chat" replace />} />
-                <Route
-                    path="/chat"
-                    element={
-                        <ChatPage
-                            user={user}
-                            incomingMessage={incomingMessage}
-                            connected={connected}
-                            typingUsers={typingUsers}
-                            onTyping={sendTyping}
-                        />
-                    }
-                />
+                <Route path="/chat" element={<ChatPage user={user} incomingMessage={incomingMessage} connected={connected} typingUsers={typingUsers} onTyping={sendTyping} />} />
                 <Route path="/games" element={<GamesPage user={user} />} />
                 <Route path="/games/:id" element={<GameRoomPage user={user} />} />
                 <Route path="/admin" element={<AdminPage user={user} />} />
